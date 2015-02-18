@@ -1,0 +1,13 @@
+{application, dobby_ofclient,
+ [
+  {description, "Dobby Client for OpenFlow"},
+  {vsn, "0.1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  lager
+                 ]},
+  {mod, { dof_app, []}},
+  {env, []}
+ ]}.
