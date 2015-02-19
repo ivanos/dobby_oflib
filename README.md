@@ -1,2 +1,2 @@
-# dobby_client
-MAP Client
+# dobby_oflib
+MAP library for OpenFlow

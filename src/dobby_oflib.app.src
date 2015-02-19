@@ -1,6 +1,6 @@
-{application, dobby_ofclient,
+{application, dobby_oflib,
  [
-  {description, "Dobby Client for OpenFlow"},
+  {description, "Dobby Library for OpenFlow"},
   {vsn, "0.1"},
   {registered, []},
   {applications, [
@@ -8,6 +8,5 @@
                   stdlib,
                   lager
                  ]},
-  {mod, { dof_app, []}},
   {env, []}
  ]}.

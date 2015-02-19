@@ -4,11 +4,12 @@
 %%% @doc <Module purpose>
 %%% @end
 %%%=============================================================================
--module(dobby_ofclient).
+-module(dobby_oflib).
 -copyright("2015, Erlang Solutions Ltd.").
 
 %% API
--export([get_path/2]).
+-export([get_path/2,
+         publish_new_flow/3]).
 
 %% Application callbacks
 -export([]).
@@ -37,6 +38,15 @@
 
 get_path(SrcEndPoint, DstEndpoint) ->
     {ok, digraph:new()}.
+
+-spec publish_new_flow(Src :: binary(), Dst :: binary(), FlowPath) ->
+                              {ok, NetFlowId :: binary()} | {error, Reason :: term()}
+                                        when
+      FlowPath :: #{DatapathId :: binary() => FlowMods :: list(FlowMod)},
+      FlowMod :: {Matches :: [term()], Instructions :: [term()], Opts :: [term()]}.
+
+publish_new_flow(SrcEndpoint, DstEndpoint, FlowPath) ->
+    ok.
 
 %%%=============================================================================
 %%% Internal functions

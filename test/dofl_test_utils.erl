@@ -4,7 +4,7 @@
 %%% @doc Test utilies
 %%% @end
 %%%=============================================================================
--module(dof_test_utils).
+-module(dofl_test_utils).
 -copyright("2015, Erlang Solutions Ltd.").
 
 %% API

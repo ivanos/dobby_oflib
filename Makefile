@@ -1,6 +1,6 @@
 APPS = kernel stdlib sasl erts ssl tools runtime_tools crypto inets \
 	public_key mnesia syntax_tools compiler
-COMBO_PLT = $(HOME)/.dobby_ofc_combo_dialyzer_plt
+COMBO_PLT = $(HOME)/.dobby_oflib_combo_dialyzer_plt
 
 .PHONY: all compile deps test clean distclean ct
 
@@ -41,7 +41,7 @@ dialyzer: compile
 
 dev: compile
 	erl -pa ebin -pa deps/*/ebin \
-	-eval "[application:start(A) || A <- [compiler, syntax_tools, goldrush, lager, dobby_ofclient]]"
+	-eval "application:ensure_all_started(dobby_oflib)."
 
 compile test clean: rebar
 
