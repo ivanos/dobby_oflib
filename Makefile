@@ -12,11 +12,11 @@ compile:
 deps:
 	./rebar get-deps
 
-test: compile
-	./rebar skip_deps=true eunit
+eunit: compile
+	./rebar -v skip_deps=true eunit
 
 ct: compile
-	./rebar ct
+	./rebar -v ct
 
 distclean: clean
 	./rebar delete-deps

@@ -8,7 +8,9 @@
 -copyright("2015, Erlang Solutions Ltd.").
 
 %% API
--export([figure4/0]).
+-export([figure4/0,
+         flow_path/0,
+         flow_path_to_identifiers/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -16,6 +18,7 @@
 %%% External functions
 %%%=============================================================================
 
+%% @doc
 %% Represents graph from figure 4 in
 %% https://docs.google.com/a/erlang-solutions.com/document/d/1HmdKtNvAR1f8JQeyY13kzGMUjdAgPDE9tuszo2OFXwM/edit#heading=h.ofp54z1pu56t
 figure4() ->
@@ -34,6 +37,39 @@ figure4() ->
          end || N <- [1,2]],
     add_link({OFP1, OFP2, connected_to}, Graph),
     Graph.
+
+%% @doc
+%% Returns sample flow path that can be passed to
+%% `dobby_oflib:publish_net_flow/3)'.
+flow_path() ->
+    [{<<"00:00:00:00:00:01:00:01">>,
+      {_OFVersion = 4,
+       [{[{in_port,1}],
+         [{apply_actions,[{output,2,no_buffer}]}],
+         [{table_id,0}, {priority, 100},
+          {idle_timeout, 0}, {idle_timeout, 0},
+          {cookie, <<0,0,0,0,0,0,0,101>>},
+          {cookie_mask, <<0,0,0,0,0,0,0,0>>}]}]
+      }},
+     {<<"00:00:00:00:00:01:00:02">>,
+      {_OFVersion = 4,
+       [{[{in_port,2}],
+         [{apply_actions,[{output,1,no_buffer}]}],
+         [{table_id,0}, {priority, 100},
+          {idle_timeout, 0}, {idle_timeout, 0},
+          {cookie, <<0,0,0,0,0,0,0,102>>},
+          {cookie_mask, <<0,0,0,0,0,0,0,0>>}]}]}
+     }].
+
+%% @doc
+%% Transletes `FlowPath' as returned by ?MODULE:figure4() into a list
+%% of subsequent identifiers.
+flow_path_to_identifiers(FlowPath) ->
+    Fun = fun({_Dpid, {_OFVersion, FlowMods}}) ->
+                  [proplists:get_value(cookie, O) || {_M, _I, O} <-FlowMods]
+          end,
+    lists:map(Fun, FlowPath).
+
 
 %%%=============================================================================
 %%% Internal functions
@@ -63,11 +99,7 @@ id(N, of_switch) ->
     list_to_binary("OFS" ++ integer_to_list(N)).
 
 no_to_dpid(N) ->
-    "00:00:00:00:00:01:00:0" ++ integer_to_list(N).
-
-dpid_to_no(Dpid) ->
-    [No | _ ] = lists:reverse(Dpid),
-    binary_to_integer(<<No>>).
+    list_to_binary("00:00:00:00:00:01:00:0" ++ integer_to_list(N)).
 
 ip(N) ->
     {10, 0, 0, N}.
