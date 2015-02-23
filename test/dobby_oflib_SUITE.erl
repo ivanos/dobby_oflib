@@ -45,18 +45,21 @@ should_publish_net_flow(_Config) ->
     NetFlowId = dobby_oflib:publish_new_flow(SrcEP, DstEP, FlowPath),
 
     %% THEN
-    meck:wait(2, dby, publish, '_', 2000),
-    ?assert(meck:called(dby, publish,
-                        [SrcEP, NetFlowId, #{type => ep_to_nf, src => SrcEP},
-                         [persistent]])),
-    ?assert(meck:called(dby, publish,
-                        [NetFlowId, DstEP, #{type => ep_to_nf, src => NetFlowId},
-                         [persistent]])),
+    assert_net_flow_published(SrcEP, DstEP, NetFlowId),
     assert_flow_path_published(NetFlowId, FlowPath).
 
 %%%=============================================================================
 %%% Assertions
 %%%=============================================================================
+
+assert_net_flow_published(SrcEP, DstEP, NetFlowId) ->
+    ?assert(meck:called(dby, publish, [SrcEP, {NetFlowId, #{type => of_net_flow}},
+                                       #{type => ep_to_nf, src => SrcEP},
+                                       [persistent]])),
+    ?assert(meck:called(dby, publish, [NetFlowId,
+                                       DstEP,
+                                       #{type => ep_to_nf, src => NetFlowId},
+                                       [persistent]])).
 
 
 assert_flow_path_published(NetFlowId, FlowPath) ->
@@ -65,24 +68,18 @@ assert_flow_path_published(NetFlowId, FlowPath) ->
                                _PrevIdentifier = NetFlowId).
 
 assert_flow_path_published(NetFlowId, [FlowMod | T], NetFlowId) ->
-    MD = #{type => of_path_starts_at,
-           src =>  NetFlowId,
-           net_flow_ids => [NetFlowId]},
-    R = {Id,_FMD} = flow_mod_identifier(FlowMod),
-    ?assert(meck:called(dby, publish, [NetFlowId, R, MD, [persistent]])),
-    assert_flow_path_published(NetFlowId, T, Id);
+    LinkMd = link_metadata(of_path_starts_at, {NetFlowId, NetFlowId}),
+    FmNode = {FmId,_FmMD} = flow_mod_identifier(FlowMod),
+    ?assert(meck:called(dby, publish, [NetFlowId, FmNode, LinkMd, [persistent]])),
+    assert_flow_path_published(NetFlowId, T, FmId);
 assert_flow_path_published(NetFlowId, [FlowMod | T], LastId) ->
-    MD = #{type => of_path_forwards_to,
-           src =>  LastId,
-           net_flow_ids => [NetFlowId]},
-    R = {Id,_FMD} = flow_mod_identifier(FlowMod),
-    ?assert(meck:called(dby, publish, [LastId, R, MD, [persistent]])),
-    assert_flow_path_published(NetFlowId, T, Id);
+    LinkMd = link_metadata(of_path_forwards_to, {NetFlowId, LastId}),
+    FmNode = {FmId,_FmMD} = flow_mod_identifier(FlowMod),
+    ?assert(meck:called(dby, publish, [LastId, FmNode, LinkMd, [persistent]])),
+    assert_flow_path_published(NetFlowId, T, FmId);
 assert_flow_path_published(NetFlowId, [], LastId) ->
-    MD = #{type => of_path_ends_at,
-           src =>  LastId,
-           net_flow_ids => [NetFlowId]},
-    ?assert(meck:called(dby, publish, [LastId, NetFlowId, MD, [persistent]])).
+    LinkMd = link_metadata(of_path_ends_at, {NetFlowId, LastId}),
+    ?assert(meck:called(dby, publish, [LastId, NetFlowId, LinkMd, [persistent]])).
 
 %%%=============================================================================
 %%% Internal functions
@@ -97,7 +94,10 @@ unmock_dobby() ->
 flow_mod_identifier({Dpid, OFVersion, FlowMod}) ->
     {_Matches, _Instructions, Opts} = FlowMod,
     Cookie = proplists:get_value(cookie, Opts),
-    {Cookie, #{dpid => Dpid, of_version => OFVersion}}.
+    {Cookie, #{type => of_flow_mod, dpid => Dpid, of_version => OFVersion}}.
+
+link_metadata(Type, {NetFlowId, Src}) ->
+    #{type => Type, src => Src, net_flow_ids => [NetFlowId]}.
 
 flatten_flow_path(FlowPath0) ->
     Fun = fun({Dpid, {OFVersion, FlowMods}}) ->

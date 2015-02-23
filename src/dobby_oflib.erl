@@ -68,8 +68,8 @@ publish_new_flow(SrcEndpoint, DstEndpoint, OpenFlowPath) ->
 
 publish_net_flow_identifer(Src, Dst) ->
     %% TODO: In transaction
-    NfId = net_flow_identifier(Src, Dst),
-    publish(Src, NfId, link_metadata(ep_to_nf, Src)),
+    NfNode = {NfId, _NfMetadata} = net_flow_identifier(Src, Dst),
+    publish(Src, NfNode, link_metadata(ep_to_nf, Src)),
     publish(NfId, Dst, link_metadata(ep_to_nf, NfId)),
     NfId.
 
@@ -93,12 +93,12 @@ publish_openflow_path(NetFlowId, [], LastId) ->
             link_metadata(of_path_ends_at, {NetFlowId, LastId})).
 
 net_flow_identifier(Src, Dst) ->
-    <<"NF:", Src/binary, ":", Dst/binary>>.
+    {<<"NF:", Src/binary, ":", Dst/binary>>, #{type => of_net_flow}}.
 
 flow_mod_identifier({Dpid, OFVersion, FlowMod}) ->
     {_Matches, _Instructions, Opts} = FlowMod,
     Cookie = proplists:get_value(cookie, Opts),
-    {Cookie, #{dpid => Dpid, of_version => OFVersion}}.
+    {Cookie, #{type => of_flow_mod, dpid => Dpid, of_version => OFVersion}}.
 
 link_metadata(Type = ep_to_nf, SrcIdentifier) ->
     #{type => Type, src => SrcIdentifier};
