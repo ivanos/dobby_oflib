@@ -11,7 +11,7 @@
 -export([get_path/2,
          publish_new_flow/3]).
 
--include_lib("dobby/include/dobby.hrl").
+-include_lib("dobby_clib/include/dobby.hrl").
 
 %% -define(MYMAC, "MY").
 
@@ -58,6 +58,8 @@ get_path(SrcEndpoint, DstEndpoint) ->
 publish_new_flow(SrcEndpoint, DstEndpoint, OpenFlowPath) ->
     NfId = publish_net_flow_identifer(SrcEndpoint, DstEndpoint),
     publish_openflow_path(NfId, OpenFlowPath),
+    lager:info("Published NetFlow: ~p between endpoints src: ~p dst: ~p ~n",
+               [NfId, SrcEndpoint, DstEndpoint]),
     NfId.
 
 %%%=============================================================================
@@ -67,8 +69,8 @@ publish_new_flow(SrcEndpoint, DstEndpoint, OpenFlowPath) ->
 publish_net_flow_identifer(Src, Dst) ->
     %% TODO: In transaction
     NfId = net_flow_identifier(Src, Dst),
-    dby:publish(Src, NfId, link_metadata(ep_to_nf, Src), [persistent]),
-    dby:publish(NfId, Dst, link_metadata(ep_to_nf, NfId), [persistent]),
+    publish(Src, NfId, link_metadata(ep_to_nf, Src)),
+    publish(NfId, Dst, link_metadata(ep_to_nf, NfId)),
     NfId.
 
 publish_openflow_path(NetFlowId, OpenFlowPath0) ->
@@ -77,18 +79,18 @@ publish_openflow_path(NetFlowId, OpenFlowPath0) ->
 
 publish_openflow_path(NetFlowId, [ExtendedFlowMod | T], LastId)
   when LastId =:= NetFlowId ->
-    Identifier = {Id, _Md} = flow_mod_identifier(ExtendedFlowMod),
-    LinkMd = link_metadata(of_path_starts_at, {NetFlowId, NetFlowId}),
-    dby:publish(NetFlowId, Identifier, LinkMd, [persistent]),
+    publish(NetFlowId,
+            {Id, _Md} = flow_mod_identifier(ExtendedFlowMod),
+            link_metadata(of_path_starts_at, {NetFlowId, NetFlowId})),
     publish_openflow_path(NetFlowId, T, Id);
 publish_openflow_path(NetFlowId, [ExtendedFlowMod | T], LastId) ->
-    Identifier = {Id, _Md} = flow_mod_identifier(ExtendedFlowMod),
-    LinkMd = link_metadata(of_path_forwards_to, {NetFlowId, LastId}),
-    dby:publish(LastId, Identifier, LinkMd, [persistent]),
+    publish(LastId,
+            {Id, _Md} = flow_mod_identifier(ExtendedFlowMod),
+            link_metadata(of_path_forwards_to, {NetFlowId, LastId})),
     publish_openflow_path(NetFlowId, T, Id);
 publish_openflow_path(NetFlowId, [], LastId) ->
-    LinkMd = link_metadata(of_path_ends_at, {NetFlowId, LastId}),
-    dby:publish(LastId, NetFlowId, LinkMd, [persistent]).
+    publish(LastId, NetFlowId,
+            link_metadata(of_path_ends_at, {NetFlowId, LastId})).
 
 net_flow_identifier(Src, Dst) ->
     <<"NF:", Src/binary, ":", Dst/binary>>.
@@ -105,6 +107,9 @@ link_metadata(Type, {NetFlowId, Src})
        Type =:= of_path_ends_at;
        Type =:= of_path_forwards_to ->
     #{type => Type, src => Src, net_flow_ids => [NetFlowId]}.
+
+publish(Src, Dst, LinkMetadata) ->
+    dby:publish(Src, Dst, LinkMetadata, [persistent]).
 
 flatten_openflow_path(FlowPath0) ->
     Fun = fun({Dpid, {OFVersion, FlowMods}}) ->

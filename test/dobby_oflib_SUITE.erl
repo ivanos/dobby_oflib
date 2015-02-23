@@ -89,10 +89,8 @@ assert_flow_path_published(NetFlowId, [], LastId) ->
 %%%=============================================================================
 
 mock_dobby() ->
-    ok = meck:expect(dby, publish,
-                     fun(SrcEp, DstEp) ->
-                             <<"NFL:", SrcEp/binary, ":", DstEp/binary>>
-                     end).
+    ok = meck:expect(dby, publish, 4, _Ret = ok).
+
 unmock_dobby() ->
     ok = meck:unload(dby).
 

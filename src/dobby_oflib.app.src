@@ -6,6 +6,7 @@
   {applications, [
                   kernel,
                   stdlib,
+                  dobby_clib,
                   lager
                  ]},
   {env, []}
