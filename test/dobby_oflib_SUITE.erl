@@ -30,6 +30,7 @@ init_per_suite(Config) ->
 
 end_per_suite(_Config) ->
     unmock_dobby(),
+    unmock_flow_table_identifiers(),
     ok.
 
 all() ->
@@ -116,6 +117,9 @@ mock_flow_table_identifiers() ->
                              <<Dpid/binary, ":", TableNoBin/binary>>
                      end).
 
+unmock_flow_table_identifiers() ->
+    ok = meck:unload(dofl_identifier).
+
 flow_mod_identifier({Dpid, OFVersion, _FlowTableId, FlowMod}) ->
     {_Matches, _Instructions, Opts} = FlowMod,
     Cookie = proplists:get_value(cookie, Opts),
@@ -129,7 +133,6 @@ link_metadata(Type, {NetFlowId, Src}) ->
     #{type => Type, src => Src, net_flow_ids => [NetFlowId]};
 link_metadata(Type, bidirectional) ->
     #{type => Type}.
-
 
 reconstruct_flow_path(FlowPath0) ->
     Fun = fun({Dpid, {OFVersion, FlowMods}}) ->

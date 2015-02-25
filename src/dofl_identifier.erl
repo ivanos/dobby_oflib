@@ -35,11 +35,23 @@ flow_mod(Dpid, OFVersion, FlowMod) ->
     {Cookie, #{type => of_flow_mod, dpid => Dpid, of_version => OFVersion}}.
 
 
--spec flow_table(Dpid :: binary(), FlowMod :: flow_mod())
+-spec flow_table(DatapathId :: binary(), FlowMod :: flow_mod())
                 -> FlowTableId :: idenfier().
 
-flow_table(Dpid, FlowMod) ->
-    <<Dpid/binary>>.
+flow_table(DatapahtId, {_Matches, _Actions, Opts}) ->
+    TableNo = proplists:get_value(table_id, Opts),
+    TableIdFun =
+        fun(Dpid, _, undefined, []) ->
+                {continue, Dpid};
+           (Identifier, IdMetadata, _LinkMetadata, Dpid) ->
+                case [maps:get(P, IdMetadata) || P <- [type, table_no]] of
+                    [of_flow_table, TableNo] ->
+                        {stop, Identifier};
+                    _ ->
+                        {skip, Dpid}
+                end
+        end,
+    dby:search(TableIdFun, [], DatapahtId, [breadth,{max_depth, 1}]).
 
 %%%=============================================================================
 %%% Internal functions
