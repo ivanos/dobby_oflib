@@ -10,3 +10,4 @@ rel/dobby_ofclient
 rebar
 log
 logs
+Mnesia.*
