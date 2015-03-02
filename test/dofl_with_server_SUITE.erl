@@ -57,7 +57,7 @@ should_publish_net_flow(_Config) ->
 
     %% THEN
     Fun = mk_net_flow_with_flow_path_fun(DstEP, AllowedTransitions),
-    Actual = dby:search(Fun, [], SrcEP, [depth, {max_depth, 10}]),
+    Actual = dby:search(Fun, [], SrcEP, [depth, {max_depth, 10}, {loop, link}]),
     ?assertEqual(Expected, Actual).
 
 %%%=============================================================================
