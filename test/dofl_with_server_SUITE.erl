@@ -12,6 +12,10 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+-define(SRC_EP, <<"SRC">>).
+-define(DST_EP, <<"DST">>).
+-define(PUBLISHER_ID, <<"PUBLISHER">>).
+
 %%%=============================================================================
 %%% Callbacks
 %%%=============================================================================
@@ -21,7 +25,8 @@ suite() ->
     [{timetrap,{minutes,10}}].
 
 init_per_suite(Config) ->
-    application:ensure_all_started(dobby),
+    mock_flow_table_identifiers(),
+    start_applications(),
     case is_dobby_server_running() of
         false ->
             ct:pal(Reason = "Dobby server is not running"),
@@ -40,61 +45,80 @@ all() ->
 should_publish_net_flow(_Config) ->
     %% GIVEN
     FlowPath = dofl_test_utils:flow_path(),
-    SrcEP = <<"EP1">>,
-    DstEP = <<"EP2">>,
     FlowPathIds = dofl_test_utils:flow_path_to_identifiers(FlowPath),
-    %% It would be better to have transitions expressed via nodes' types
-    AllowedTransitions = [{ep_to_nf, of_path_starts_at},
-                          {of_path_starts_at, of_path_ends_at},
-                          {of_path_starts_at, of_path_forwards_to},
-                          {of_path_forwards_to, of_path_forwards_to},
-                          {of_path_forwards_to, of_path_ends_at},
-                          {of_path_ends_at, ep_to_nf}],
+    publish_endpoints(),
 
     %% WHEN
-    {ok, NetFlowId} = dobby_oflib:publish_new_flow(SrcEP, DstEP, FlowPath),
-    Expected = lists:flatten([SrcEP, NetFlowId, FlowPathIds, NetFlowId, DstEP]),
+    {ok, NetFlowId} = dobby_oflib:publish_new_flow(?PUBLISHER_ID, ?SRC_EP, ?DST_EP, FlowPath),
+    Expected = lists:flatten(
+                 [?SRC_EP, NetFlowId, FlowPathIds, NetFlowId, ?DST_EP]),
 
-    %% THEN
-    Fun = mk_net_flow_with_flow_path_fun(DstEP, AllowedTransitions),
-    Actual = dby:search(Fun, [], SrcEP, [depth, {max_depth, 10}, {loop, link}]),
+    %% %% THEN
+    Fun = mk_net_flow_with_flow_path_fun(?DST_EP),
+    Actual = dby:search(Fun, [], ?SRC_EP, [depth, {max_depth, 10}, {loop, link}]),
     ?assertEqual(Expected, Actual).
 
 %%%=============================================================================
 %%% Internal functions
 %%%=============================================================================
 
+start_applications() ->
+    application:ensure_all_started(dobby),
+    application:ensure_all_started(dobby_oflib).
+
 is_dobby_server_running() ->
     proplists:is_defined(dobby, application:which_applications()).
 
-mk_net_flow_with_flow_path_fun(DstEndpoint, AllowedTransitions) ->
-    fun(Identifier, IdMetadata, LinkMetadata, Acc = [Prev | _])
-          when length(Acc) >= 2 ->
-            T = transition(Prev, LinkMetadata),
-            case is_transition_allowed(T, AllowedTransitions) of
+mock_flow_table_identifiers() ->
+    ok = meck:expect(dofl_identifier, flow_table,
+                     fun(Dpid, _FlowMod = {_, _, Opts}) ->
+                             TableNo = proplists:get_value(table_id, Opts),
+                             TableNoBin = integer_to_binary(TableNo),
+                             <<Dpid/binary, ":", TableNoBin/binary>>
+                     end).
+
+publish_endpoints() ->
+    [dby:publish(
+       ?PUBLISHER_ID, {EP, [{<<"type">>, <<"endpoint">>}]}, [persistent])
+     || EP <- [?SRC_EP, ?DST_EP]].
+
+mk_net_flow_with_flow_path_fun(DstEndpoint) ->
+    fun(Identifier, _IdMetadataInfo, [], _) ->
+            {continue, [allowed_transitions(init, []), [Identifier]]};
+       (Identifier, IdMetadataInfo, [{_, PrevIdMetadataInfo, _} | _], Acc) ->
+            [AllowedT, IdentifiersAcc] = Acc,
+            T = transition(PrevIdMetadataInfo, IdMetadataInfo),
+            case is_transition_allowed(T, AllowedT) of
                 false ->
                     {skip, Acc};
                 true when Identifier == DstEndpoint ->
-                    Result = [{Identifier, IdMetadata, LinkMetadata} | Acc],
-                    {stop, filter_out_metadata(Result)};
+                    {stop, [Identifier | IdentifiersAcc]};
                 true ->
-                    {continue, [{Identifier, IdMetadata, LinkMetadata} | Acc]}
-            end;
-       (Identifier, IdMetadata, LinkMetadata, Acc) ->
-            {continue, [{Identifier, IdMetadata, LinkMetadata} | Acc]}
+                    NewAllowedT = allowed_transitions(T, AllowedT),
+                    {continue, [NewAllowedT, [Identifier | IdentifiersAcc]]}
+            end
     end.
 
-transition(PrevData, LinkMetadata) ->
-    {_PrevIdentifier, _PrevIdMetadata, PrevLinkMetadata} = PrevData,
-    {maps:get(type, PrevLinkMetadata), maps:get(type, LinkMetadata)}.
+transition(PrevIdMetadataInfo, IdMetadataInfo) ->
+    [PrevT, T] =  [begin
+                       TypeMap = maps:get(<<"type">>, MetadataInfo),
+                       maps:get(<<"value">>, TypeMap)
+                   end || MetadataInfo <- [PrevIdMetadataInfo, IdMetadataInfo]],
+    {atom_to_binary(PrevT, utf8), atom_to_binary(T, utf8)}.
 
 is_transition_allowed(Transition, AllowedTransitions) ->
     lists:member(Transition, AllowedTransitions).
 
-filter_out_metadata(SearchResult) ->
-    lists:map(fun({Identifier, _, _}) ->
-                      Identifier
-              end, SearchResult).
+allowed_transitions({endpoint, of_net_flow}, _CurrentAllowedT) ->
+    [{of_net_flow, of_flow_mod},
+     {of_flow_mod, of_flow_mod},
+     {of_flow_mod, of_net_flow}];
+allowed_transitions({of_flow_mod, net_flow}, _CurrentAllowedT) ->
+    [{net_flow, endpoint}];
+allowed_transitions(init, _CurrentAllowedT) ->
+    [{endpoint, of_net_flow}];
+allowed_transitions(_, CurrentAllowedT) ->
+    CurrentAllowedT.
 
 trace_dby_publish() ->
     {module, M} = code:ensure_loaded(M = dby),
