@@ -21,14 +21,13 @@
 %%% External functions
 %%%=============================================================================
 
--spec endpoint_with_net_flow(Src :: identifier()) -> Metadata :: map().
+-spec endpoint_with_net_flow(dby_identifier()) -> map().
 
 endpoint_with_net_flow(Src) ->
     #{type => ep_to_nf, src => Src}.
 
 
--spec net_flow_with_flow_mod(Src :: identifier(), NetFlowId :: identifier())
-                            -> Metadata :: map().
+-spec net_flow_with_flow_mod(dby_identifier(), dby_identifier()) -> map().
 
 net_flow_with_flow_mod(Src, NetFlowId) when Src =:= NetFlowId ->
     #{type => of_path_starts_at, src => Src, net_flow_ids => [NetFlowId]};
@@ -36,13 +35,12 @@ net_flow_with_flow_mod(Src, NetFlowId) ->
     #{type => of_path_ends_at, src => Src, net_flow_ids => [NetFlowId]}.
 
 
--spec between_flow_mods(Src :: identifier(), NetFlowId :: identifier()) ->
-                               Metadata :: map().
+-spec between_flow_mods(dby_identifier(), dby_identifier()) -> map().
 
 between_flow_mods(Src, NetFlowId) ->
     #{type => of_path_forwards_to, src => Src, net_flow_ids => [NetFlowId]}.
 
--spec flow_mod_with_flow_table() -> Metadata :: map().
+-spec flow_mod_with_flow_table() -> map().
 
 flow_mod_with_flow_table() ->
     #{type => of_resource}.

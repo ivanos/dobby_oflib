@@ -46,7 +46,7 @@ should_publish_net_flow(_Config) ->
     FlowPath = dofl_test_utils:flow_path(),
 
     %% WHEN
-    NetFlowId = dobby_oflib:publish_new_flow(?SRC_EP, ?DST_EP, FlowPath),
+    {ok, NetFlowId} = dobby_oflib:publish_new_flow(?SRC_EP, ?DST_EP, FlowPath),
 
     %% THEN
     assert_net_flow_published(?SRC_EP, ?DST_EP, NetFlowId).
@@ -57,7 +57,7 @@ should_publish_flow_path(_Config) ->
     FlowPath1 = reconstruct_flow_path(FlowPath0),
 
     %% WHEN
-    NetFlowId = dobby_oflib:publish_new_flow(?SRC_EP, ?DST_EP, FlowPath0),
+    {ok, NetFlowId} = dobby_oflib:publish_new_flow(?SRC_EP, ?DST_EP, FlowPath0),
 
     %% THEN
     assert_flow_path_published(NetFlowId, FlowPath1).

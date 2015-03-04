@@ -52,7 +52,7 @@ should_publish_net_flow(_Config) ->
                           {of_path_ends_at, ep_to_nf}],
 
     %% WHEN
-    NetFlowId = dobby_oflib:publish_new_flow(SrcEP, DstEP, FlowPath),
+    {ok, NetFlowId} = dobby_oflib:publish_new_flow(SrcEP, DstEP, FlowPath),
     Expected = lists:flatten([SrcEP, NetFlowId, FlowPathIds, NetFlowId, DstEP]),
 
     %% THEN

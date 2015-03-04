@@ -36,9 +36,9 @@ get_path(SrcEndpoint, DstEndpoint) ->
 %%
 %% The function returns Net Flow Identifier: `NetFlowId' that can be
 %% used for referencing published Net Flow.
--spec publish_new_flow(identifier(), identifier(), flow_path()) ->
+-spec publish_new_flow(dby_identifier(), dby_identifier(), flow_path()) ->
                               Result when
-      Result :: {ok, NetFlowId :: endpoint()}
+      Result :: {ok, NetFlowId :: dby_endpoint()}
               | {error, Reason :: term()}.
 
 publish_new_flow(SrcEndpoint, DstEndpoint, FlowPath) ->
@@ -46,7 +46,7 @@ publish_new_flow(SrcEndpoint, DstEndpoint, FlowPath) ->
     publish_flow_path(NfId, FlowPath),
     lager:info("Published NetFlow: ~p between endpoints src: ~p dst: ~p ~n",
                [NfId, SrcEndpoint, DstEndpoint]),
-    NfId.
+    {ok, NfId}.
 
 %%%=============================================================================
 %%% Internal functions
