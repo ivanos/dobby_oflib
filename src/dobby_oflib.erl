@@ -22,7 +22,18 @@
                       {ok, Path :: digraph:graph()} | {error, Reason :: term()}.
 
 get_path(SrcEndpoint, DstEndpoint) ->
-    {ok, digraph:new()}.
+    case dby:search(
+           vertices_edges_search_fun(SrcEndpoint, DstEndpoint),
+           not_found,
+           SrcEndpoint,
+           [breadth, {max_depth, 100}]) of
+        Path = [_|_] ->
+            Digraph = digraph:new(),
+            insert_path(Path, Digraph),
+            {ok, Digraph};
+        not_found ->
+            {error, no_path}
+    end.
 
 %% @doc Publish a Net Flow between two endpoints to Dobby.
 %%
@@ -102,4 +113,67 @@ reconstruct_flow_path(FlowPath0) ->
     FlowPath1 = lists:map(Fun, FlowPath0),
     lists:flatten(FlowPath1).
 
+%% This function returns a function to be passed to dby:search.
+vertices_edges_search_fun(Ep1, Ep2) ->
+    fun(Id, #{<<"type">> := <<"endpoint">>}, [], Acc) when Id =:= Ep1 ->
+            %% This is the starting point.
+            {continue, Acc};
+       (Id,
+        #{<<"type">> := <<"endpoint">>} = NodeMetadata,
+        [{_, #{<<"type">> := <<"of_port">>}, #{<<"type">> := <<"connected_to">>}} | _] = Path,
+        Acc) ->
+            %% We've found an endpoint.  That's only interesting if
+            %% it's the endpoint we're looking for.
+            if Id =:= Ep2 ->
+                    %% If so, stop and return the path.
+                    {stop, lists:reverse(Path, [{Id, NodeMetadata, #{}}])};
+               true ->
+                    %% Otherwise, keep going.
+                    {skip, Acc}
+            end;
+       (_Id,
+        #{<<"type">> := Type2},
+        [{_, #{<<"type">> := Type1}, #{<<"type">> := EdgeType}} | _],
+        Acc) ->
+            case valid_edge(Type1, EdgeType, Type2) of
+                true ->
+                    {continue, Acc};
+                false ->
+                    {skip, Acc}
+            end
+    end.
 
+-spec valid_edge(Node1Type :: binary(),
+                 EdgeType :: binary(),
+                 Node2Type :: binary()) -> boolean().
+%% @doc
+%% Return true if we should follow an edge of type `EdgeType' from a
+%% node of type `Node1Type' to a node of type `Node2Type'.
+valid_edge(<<"endpoint">>, <<"connected_to">>, <<"of_port">>) ->
+    true;
+valid_edge(<<"of_port">>, <<"port_of">>, <<"of_switch">>) ->
+    true;
+valid_edge(<<"of_switch">>, <<"port_of">>, <<"of_port">>) ->
+    true;
+valid_edge(<<"of_port">>, <<"connected_to">>, <<"of_port">>) ->
+    true;
+valid_edge(_, _, _) ->
+    false.
+
+insert_path([{NodeId, NodeMetadata, EdgeMetadata} | Rest],
+            Digraph) ->
+    %% Insert the first node as a vertex.
+    digraph:add_vertex(Digraph, NodeId, NodeMetadata),
+    %% Then recurse through the rest of the list, adding edges as we
+    %% go along.
+    insert_path(Rest, NodeId, EdgeMetadata, Digraph).
+
+insert_path([], _, _, _) ->
+    ok;
+insert_path([{NodeId, NodeMetadata, NextEdgeMetadata} | Rest],
+            PreviousNodeId, EdgeMetadata, Digraph) ->
+    digraph:add_vertex(Digraph, NodeId, NodeMetadata),
+    %% We want bidirectional edges:
+    digraph:add_edge(Digraph, PreviousNodeId, NodeId, EdgeMetadata),
+    digraph:add_edge(Digraph, NodeId, PreviousNodeId, EdgeMetadata),
+    insert_path(Rest, NodeId, NextEdgeMetadata, Digraph).
