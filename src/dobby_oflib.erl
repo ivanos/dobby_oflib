@@ -107,16 +107,7 @@ flow_table_identifier({Dpid, _OFVersion, FlowMod}) ->
     dofl_identifier:flow_table(Dpid, FlowMod).
 
 publish(PublisherId, Src, Dst, LinkMetadata) ->
-    %% HACK: New API of dobby is out of sync with dobby_clib; but we
-    %% want to mock dby:publish/5 for tests
-    try dby:publish(PublisherId, Src, Dst, LinkMetadata, [persistent])
-    catch
-        error:undef ->
-            Data = [{Src, Dst, LinkMetadata}],
-            Opts = [persistent],
-            gen_server:call({global,dobby},
-                            {dby_publish, [PublisherId, Data, Opts]})
-    end.
+    dofl_publish:do(PublisherId, Src, Dst, LinkMetadata).
 
 reconstruct_flow_path(FlowPath0) ->
     Fun = fun({Dpid, {OFVersion, FlowMods}}) ->
