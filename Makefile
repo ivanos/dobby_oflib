@@ -16,7 +16,7 @@ eunit: compile
 	./rebar -v skip_deps=true eunit
 
 ct: compile
-	./rebar -v ct
+	./rebar -v ct $(CTARGS)
 
 distclean: clean
 	./rebar delete-deps
