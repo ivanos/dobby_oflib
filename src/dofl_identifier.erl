@@ -39,18 +39,36 @@ flow_mod(Dpid, OFVersion, FlowMod) ->
 flow_table(DatapahtId, {_Matches, _Actions, Opts}) ->
     TableNo = proplists:get_value(table_id, Opts),
     TableIdFun =
-        fun(Dpid, _, undefined, []) ->
-                {continue, Dpid};
-           (Identifier, IdMetadata, _LinkMetadata, Dpid) ->
-                case [maps:get(P, IdMetadata) || P <- [type, table_no]] of
-                    [of_flow_table, TableNo] ->
+        fun(Dpid, _, [], _) when Dpid =:= DatapahtId ->
+                {continue, []};
+           (Identifier, IdMetadataInfo, _, _) ->
+                case table_found(IdMetadataInfo, TableNo) of
+                    true ->
                         {stop, Identifier};
                     _ ->
-                        {skip, Dpid}
+                        {skip, []}
                 end
         end,
-    dby:search(TableIdFun, [], DatapahtId, [breadth,{max_depth, 1}]).
+    dby:search(TableIdFun, [], [], [breadth, {max_depth, 1}]).
 
 %%%=============================================================================
 %%% Internal functions
 %%%=============================================================================
+
+table_found(IdMetadataInfo, TableNo) ->
+    case get_metadata_value(type, IdMetadataInfo) of
+        of_flow_table ->
+            TableNo =:= get_metadata_value(table_no, IdMetadataInfo);
+        _ ->
+            false
+    end.
+
+get_metadata_value(Key, Metadatainfo) ->
+    KeyMap = maps:get(atom_to_binary(Key, utf8), Metadatainfo),
+    Value = maps:get(value, KeyMap),
+    case is_binary(Value) of
+        true ->
+            binary_to_atom(Value, utf8);
+        _ ->
+            Value
+    end.

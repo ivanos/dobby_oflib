@@ -104,7 +104,7 @@ transition(PrevIdMetadataInfo, IdMetadataInfo) ->
                        TypeMap = maps:get(<<"type">>, MetadataInfo),
                        maps:get(<<"value">>, TypeMap)
                    end || MetadataInfo <- [PrevIdMetadataInfo, IdMetadataInfo]],
-    {atom_to_binary(PrevT, utf8), atom_to_binary(T, utf8)}.
+    {binary_to_atom(PrevT, utf8), binary_to_atom(T, utf8)}.
 
 is_transition_allowed(Transition, AllowedTransitions) ->
     lists:member(Transition, AllowedTransitions).

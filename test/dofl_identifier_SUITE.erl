@@ -50,6 +50,19 @@ should_query_flow_table_id(_Config) ->
     assert_dobby_search_fun_correct(?DPID, TableNo).
 
 %%%=============================================================================
+%%% Assertions
+%%%=============================================================================
+
+assert_dobby_search_fun_correct(Dpid, TableNo) ->
+    SearchFun = meck:capture(first, dby, search, 4, _ArgNo = 1),
+    Path = switch_to_flow_table_path(Dpid),
+    SearchResult = SearchFun(_FlowTableId = ?TABLE_IDENTIFIER,
+                             flow_table_metadata_info(TableNo),
+                             Path,
+                             []),
+    ?assertEqual({stop, ?TABLE_IDENTIFIER}, SearchResult).
+
+%%%=============================================================================
 %%% Internal functions
 %%%=============================================================================
 
@@ -58,14 +71,21 @@ mock_dobby() ->
 unmock_dobby() ->
     ok = meck:unload(dby).
 
-assert_dobby_search_fun_correct(Dpid, TableNo) ->
-    SearchFun = meck:capture(first, dby, search, ['_', '_', Dpid, '_'],
-                             _ArgNo = 1),
-    NullLink = {Dpid, null, undefined},
-    SearchResult = SearchFun(?TABLE_IDENTIFIER,
-                             #{type => of_flow_table, table_no => TableNo},
-                             #{type => of_resource},
-                             [NullLink]),
-    ?assertEqual({stop, ?TABLE_IDENTIFIER}, SearchResult).
+switch_to_flow_table_path(Dpid) ->
+    [{_SwIdentifier = Dpid,
+      _SwIdMetadataInfo = metadata([{type, of_switch}]),
+      _SwToFlowTableMetadataInfo =  metadata([{type, of_resource}])}].
 
+flow_table_metadata_info(TableNo) ->
+    metadata([{type, of_flow_table}, {table_no, TableNo}]).
 
+metadata(Proplist) ->
+    lists:foldl(fun({K, V}, AccMap)  ->
+                        IM = inner_metadata(V),
+                        maps:put(atom_to_binary(K, utf8), IM, AccMap)
+                end, #{}, Proplist).
+
+inner_metadata(V) when is_atom(V) ->
+    inner_metadata(atom_to_binary(V, utf8));
+inner_metadata(V) ->
+    #{value => V, publisher_id => <<"ID">>, timestamp => <<"TSTM">>}.
