@@ -24,14 +24,14 @@
 -spec net_flow(dby_identifier(), dby_identifier()) -> dby_endpoint().
 
 net_flow(Src, Dst) ->
-    {<<"NF:", Src/binary, ":", Dst/binary>>, #{type => of_net_flow}}.
+    {<<"NF:", Src/binary, ":", Dst/binary>>, [{type, of_net_flow}]}.
 
 -spec flow_mod(dby_identifier(), of_version(), flow_mod()) -> dby_endpoint().
 
 flow_mod(Dpid, OFVersion, FlowMod) ->
     {_Matches, _Instructions, Opts} = FlowMod,
     Cookie = proplists:get_value(cookie, Opts),
-    {Cookie, #{type => of_flow_mod, dpid => Dpid, of_version => OFVersion}}.
+    {Cookie, [{type, of_flow_mod}, {dpid, Dpid}, {of_version, OFVersion}]}.
 
 
 -spec flow_table(dby_identifier(), flow_mod()) -> dby_identifier().

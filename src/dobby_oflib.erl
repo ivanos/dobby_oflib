@@ -9,7 +9,7 @@
 
 %% API
 -export([get_path/2,
-         publish_new_flow/3]).
+         publish_new_flow/4]).
 
 -include_lib("dobby_clib/include/dobby.hrl").
 -include("dobby_oflib.hrl").
@@ -47,14 +47,14 @@ get_path(SrcEndpoint, DstEndpoint) ->
 %%
 %% The function returns Net Flow Identifier: `NetFlowId' that can be
 %% used for referencing published Net Flow.
--spec publish_new_flow(dby_identifier(), dby_identifier(), flow_path()) ->
-                              Result when
+-spec publish_new_flow(binary(), dby_identifier(), dby_identifier(), flow_path())
+                      -> Result when
       Result :: {ok, NetFlowId :: dby_endpoint()}
               | {error, Reason :: term()}.
 
-publish_new_flow(SrcEndpoint, DstEndpoint, FlowPath) ->
-    NfId = publish_net_flow_identifier(SrcEndpoint, DstEndpoint),
-    publish_flow_path(NfId, FlowPath),
+publish_new_flow(PublisherId, SrcEndpoint, DstEndpoint, FlowPath) ->
+    NfId = publish_net_flow_identifier(PublisherId, SrcEndpoint, DstEndpoint),
+    publish_flow_path(PublisherId, NfId, FlowPath),
     lager:info("Published NetFlow: ~p between endpoints src: ~p dst: ~p ~n",
                [NfId, SrcEndpoint, DstEndpoint]),
     {ok, NfId}.
@@ -63,38 +63,41 @@ publish_new_flow(SrcEndpoint, DstEndpoint, FlowPath) ->
 %%% Internal functions
 %%%=============================================================================
 
-publish_net_flow_identifier(Src, Dst) ->
-    %% TODO: In transaction
+publish_net_flow_identifier(PublisherId, Src, Dst) ->
     NfNode = {NfId, _NfMetadata} = dofl_identifier:net_flow(Src, Dst),
-    publish(Src, NfNode,
+    publish(PublisherId, Src, NfNode,
             dofl_link_metadata:endpoint_with_net_flow(Src)),
-    publish(NfId, Dst,
+    publish(PublisherId, NfId, Dst,
             dofl_link_metadata:endpoint_with_net_flow(NfId)),
     NfId.
 
-publish_flow_path(NetFlowId, FlowPath0) ->
+publish_flow_path(PublisherId, NetFlowId, FlowPath0) ->
     FlowPath1 = reconstruct_flow_path(FlowPath0),
-    publish_flow_path(NetFlowId, FlowPath1, NetFlowId).
+    publish_flow_path(PublisherId, NetFlowId, FlowPath1, NetFlowId).
 
-publish_flow_path(NetFlowId, [ExtendedFlowMod | T], LastId)
+publish_flow_path(PublisherId, NetFlowId, [ExtendedFlowMod | T], LastId)
   when LastId =:= NetFlowId ->
-    publish(NetFlowId,
+    publish(PublisherId,
+            NetFlowId,
             {Id, _Md} = flow_mod_identifier(ExtendedFlowMod),
             dofl_link_metadata:net_flow_with_flow_mod(NetFlowId, NetFlowId)),
-    publish(Id,
+    publish(PublisherId,
+            Id,
             flow_table_identifier(ExtendedFlowMod),
             dofl_link_metadata:flow_mod_with_flow_table()),
-    publish_flow_path(NetFlowId, T, Id);
-publish_flow_path(NetFlowId, [ExtendedFlowMod | T], LastId) ->
-    publish(LastId,
+    publish_flow_path(PublisherId, NetFlowId, T, Id);
+publish_flow_path(PublisherId, NetFlowId, [ExtendedFlowMod | T], LastId) ->
+    publish(PublisherId,
+            LastId,
             {Id, _Md} = flow_mod_identifier(ExtendedFlowMod),
             dofl_link_metadata:between_flow_mods(LastId, NetFlowId)),
-    publish(Id,
+    publish(PublisherId,
+            Id,
             flow_table_identifier(ExtendedFlowMod),
             dofl_link_metadata:flow_mod_with_flow_table()),
-    publish_flow_path(NetFlowId, T, Id);
-publish_flow_path(NetFlowId, [], LastId) ->
-    publish(LastId, NetFlowId,
+    publish_flow_path(PublisherId, NetFlowId, T, Id);
+publish_flow_path(PublisherId, NetFlowId, [], LastId) ->
+    publish(PublisherId, LastId, NetFlowId,
             dofl_link_metadata:net_flow_with_flow_mod(LastId, NetFlowId)).
 
 flow_mod_identifier({Dpid, OFVersion, FlowMod}) ->
@@ -103,8 +106,8 @@ flow_mod_identifier({Dpid, OFVersion, FlowMod}) ->
 flow_table_identifier({Dpid, _OFVersion, FlowMod}) ->
     dofl_identifier:flow_table(Dpid, FlowMod).
 
-publish(Src, Dst, LinkMetadata) ->
-    dby:publish(Src, Dst, LinkMetadata, [persistent]).
+publish(PublisherId, Src, Dst, LinkMetadata) ->
+    dofl_publish:do(PublisherId, Src, Dst, LinkMetadata).
 
 reconstruct_flow_path(FlowPath0) ->
     Fun = fun({Dpid, {OFVersion, FlowMods}}) ->
