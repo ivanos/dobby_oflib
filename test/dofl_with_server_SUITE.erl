@@ -25,7 +25,6 @@ suite() ->
     [{timetrap,{minutes,10}}].
 
 init_per_suite(Config) ->
-    mock_flow_table_identifiers(),
     start_applications(),
     case is_dobby_server_running() of
         false ->
@@ -35,8 +34,22 @@ init_per_suite(Config) ->
             Config
     end.
 
+init_per_testcase(should_find_flow_table_identifers, Config) ->
+    TopFilename = ?config(data_dir, Config) ++ "topo.json",
+    dby_bulk:import(json0, TopFilename),
+    Config;
+init_per_testcase(_, Config) ->
+    mock_flow_table_identifiers(),
+    Config.
+
+end_per_testcase(_, Config) ->
+    meck:unload(),
+    Config.
+
 all() ->
-    [should_publish_net_flow].
+    [should_publish_net_flow,
+     should_find_flow_table_identifers,
+     should_publish_flow_path].
 
 %%%=============================================================================
 %%% Testcases
@@ -45,18 +58,42 @@ all() ->
 should_publish_net_flow(_Config) ->
     %% GIVEN
     FlowPath = dofl_test_utils:flow_path(),
+    publish_endpoints(),
+
+    %% WHEN
+    {ok, NetFlowId} = dobby_oflib:publish_new_flow(?PUBLISHER_ID, ?SRC_EP, ?DST_EP, FlowPath),
+    Expected = [?SRC_EP, NetFlowId, ?DST_EP],
+
+    %% %% THEN
+    Fun = mk_net_flow_fun(?DST_EP),
+    Actual = dby:search(Fun, [], ?SRC_EP, [depth, {max_depth, 10}, {loop, link}]),
+    ?assertEqual(Expected, Actual).
+
+should_publish_flow_path(_Config) ->
+    %% GIVEN
+    FlowPath = dofl_test_utils:flow_path(),
     FlowPathIds = dofl_test_utils:flow_path_to_identifiers(FlowPath),
     publish_endpoints(),
 
     %% WHEN
     {ok, NetFlowId} = dobby_oflib:publish_new_flow(?PUBLISHER_ID, ?SRC_EP, ?DST_EP, FlowPath),
-    Expected = lists:flatten(
-                 [?SRC_EP, NetFlowId, FlowPathIds, NetFlowId, ?DST_EP]),
+    Expected = lists:flatten([NetFlowId, FlowPathIds, NetFlowId]),
 
     %% %% THEN
-    Fun = mk_net_flow_with_flow_path_fun(?DST_EP),
-    Actual = dby:search(Fun, [], ?SRC_EP, [depth, {max_depth, 10}, {loop, link}]),
+    Fun = mk_flow_path_fun(NetFlowId),
+    Actual = dby:search(Fun, [], NetFlowId, [breadth, {max_depth, 10}, {loop, link}]),
     ?assertEqual(Expected, Actual).
+
+should_find_flow_table_identifers(_Config) ->
+    %% GIVEN
+    Dpid = <<"OFS1">>,
+    FlowMod = {_Matches = [], _Actions = [], [{table_id, 0}]},
+
+    %% WHEN
+    Id = dofl_identifier:flow_table(Dpid, FlowMod),
+
+    %% THEN
+    ?assertEqual(<<"OFS1-table-0">>, Id).
 
 %%%=============================================================================
 %%% Internal functions
@@ -82,45 +119,65 @@ publish_endpoints() ->
        ?PUBLISHER_ID, {EP, [{<<"type">>, <<"endpoint">>}]}, [persistent])
      || EP <- [?SRC_EP, ?DST_EP]].
 
-mk_net_flow_with_flow_path_fun(DstEndpoint) ->
+mk_net_flow_fun(DstEndpoint) ->
     fun(Identifier, _IdMetadataInfo, [], _) ->
-            {continue, [allowed_transitions(init, []), [Identifier]]};
-       (Identifier, IdMetadataInfo, [{_, PrevIdMetadataInfo, _} | _], Acc) ->
-            [AllowedT, IdentifiersAcc] = Acc,
-            T = transition(PrevIdMetadataInfo, IdMetadataInfo),
-            case is_transition_allowed(T, AllowedT) of
-                false ->
-                    {skip, Acc};
-                true when Identifier == DstEndpoint ->
-                    {stop, [Identifier | IdentifiersAcc]};
+            {continue, {net_flow_next_trasitions(init), [Identifier]}};
+       (Identifier, IdMetadataInfo, [PrevPathElement | _], Acc) ->
+            {NextTs, IdAcc} = Acc,
+            T = transition(PrevPathElement, IdMetadataInfo),
+            case transition_allowed(T, NextTs) of
+                true when Identifier =:= DstEndpoint ->
+                    {stop, lists:reverse([Identifier | IdAcc])};
                 true ->
-                    NewAllowedT = allowed_transitions(T, AllowedT),
-                    {continue, [NewAllowedT, [Identifier | IdentifiersAcc]]}
+                    {continue, {net_flow_next_trasitions(IdMetadataInfo),
+                                [Identifier | IdAcc]}};
+                false ->
+                    {skip, Acc}
             end
     end.
 
-transition(PrevIdMetadataInfo, IdMetadataInfo) ->
-    [PrevT, T] =  [begin
-                       TypeMap = maps:get(<<"type">>, MetadataInfo),
-                       maps:get(<<"value">>, TypeMap)
-                   end || MetadataInfo <- [PrevIdMetadataInfo, IdMetadataInfo]],
-    {binary_to_atom(PrevT, utf8), binary_to_atom(T, utf8)}.
+mk_flow_path_fun(NetFlowId) ->
+    fun(Identifier, _IdMetadataInfo, [], _) ->
+            {continue, {flow_path_next_trasitions(init), [Identifier]}};
+       (Identifier, IdMetadataInfo, [PrevPathElement | _], Acc) ->
+            {NextTs, IdAcc} = Acc,
+            T = transition(PrevPathElement, IdMetadataInfo),
+            case transition_allowed(T, NextTs) of
+                true when Identifier =:= NetFlowId ->
+                    {stop, lists:reverse([Identifier | IdAcc])};
+                true ->
+                    {continue, {flow_path_next_trasitions(IdMetadataInfo),
+                                [Identifier | IdAcc]}};
+                false ->
+                    {skip, Acc}
+            end
+    end.
 
-is_transition_allowed(Transition, AllowedTransitions) ->
-    lists:member(Transition, AllowedTransitions).
+net_flow_next_trasitions(init) ->
+    [{ep_to_nf, of_net_flow}];
+net_flow_next_trasitions(#{<<"type">> := IdType}) ->
+    net_flow_next_trasitions(binary_to_atom(maps:get(value, IdType), utf8));
+net_flow_next_trasitions(of_net_flow) ->
+    [{ep_to_nf, endpoint}].
 
-allowed_transitions({endpoint, of_net_flow}, _CurrentAllowedT) ->
-    [{of_net_flow, of_flow_mod},
-     {of_flow_mod, of_flow_mod},
-     {of_flow_mod, of_net_flow}];
-allowed_transitions({of_flow_mod, net_flow}, _CurrentAllowedT) ->
-    [{net_flow, endpoint}];
-allowed_transitions(init, _CurrentAllowedT) ->
-    [{endpoint, of_net_flow}];
-allowed_transitions(_, CurrentAllowedT) ->
-    CurrentAllowedT.
+flow_path_next_trasitions(init) ->
+    [{LinkT, of_flow_mod} || LinkT <- [of_path_starts_at, of_path_ends_at]];
+flow_path_next_trasitions(#{<<"type">> := IdType}) ->
+    flow_path_next_trasitions(binary_to_atom(maps:get(value, IdType), utf8));
+flow_path_next_trasitions(of_flow_mod) ->
+    [{of_path_forwards_to, of_flow_mod} |
+     [{LinkT, of_net_flow} || LinkT <- [of_path_starts_at, of_path_ends_at]]].
+
+transition_allowed(T, AllowedTs) ->
+    lists:member(T, AllowedTs).
+
+transition({_, _, #{<<"type">> := LinkType}}, #{<<"type">> := IdType}) ->
+    F = fun(T) -> binary_to_atom(maps:get(value, T), utf8) end,
+    {F(LinkType), F(IdType)};
+transition(_, _) ->
+    unknown.
 
 trace_dby_publish() ->
     {module, M} = code:ensure_loaded(M = dby),
     ct:pal("Matched traces: ~p~n",
-           [recon_trace:calls({dby, publish, '_'}, 10, [{pid, all}])]).
+           [recon_trace:calls({dby, publish, '_'}, 20, [{pid, all}])]).

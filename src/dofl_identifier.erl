@@ -49,7 +49,7 @@ flow_table(DatapahtId, {_Matches, _Actions, Opts}) ->
                         {skip, []}
                 end
         end,
-    dby:search(TableIdFun, [], [], [breadth, {max_depth, 1}]).
+    dby:search(TableIdFun, [], DatapahtId, [breadth, {max_depth, 1}]).
 
 %%%=============================================================================
 %%% Internal functions
@@ -64,11 +64,12 @@ table_found(IdMetadataInfo, TableNo) ->
     end.
 
 get_metadata_value(Key, Metadatainfo) ->
-    KeyMap = maps:get(atom_to_binary(Key, utf8), Metadatainfo),
-    Value = maps:get(value, KeyMap),
-    case is_binary(Value) of
-        true ->
-            binary_to_atom(Value, utf8);
-        _ ->
-            Value
+    KeyMap = maps:get(atom_to_binary(Key, utf8), Metadatainfo, undefined),
+    case KeyMap =/= undefined andalso maps:get(value, KeyMap) of
+        false ->
+            undefined;
+        V when is_binary(V) ->
+            binary_to_atom(V, utf8);
+        V ->
+            V
     end.
