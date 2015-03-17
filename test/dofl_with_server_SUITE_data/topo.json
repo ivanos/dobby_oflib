@@ -4,7 +4,7 @@
 	"metadata": { "type": "endpoint" }
     },
     {
-	"identifier": "OFS1",
+	"identifier": "00:00:00:00:00:01:00:01",
 	"metadata": {
 	    "type": "of_switch",
 	    "datapath_id": "00:00:00:00:00:01:00:01"
@@ -38,7 +38,7 @@
 	"metadata": { "type": "port_of" }
     },
     {
-	"identifier": "OFS2",
+	"identifier": "00:00:00:00:00:01:00:02",
 	"metadata": {
 	    "type": "of_switch",
 	    "datapath_id": "00:00:00:00:00:01:00:02"
@@ -130,11 +130,11 @@
 	"metadata": { "type": "connected_to" }
     },
     {
-        "link": ["OFS1", "OFS1-table-0"],
+        "link": ["00:00:00:00:00:01:00:01", "OFS1-table-0"],
         "metadata": { "type": "of_resource" }
     },
     {
-        "link": ["OFS2", "OFS2-table-0"],
+        "link": ["00:00:00:00:00:01:00:02", "OFS2-table-0"],
         "metadata": { "type": "of_resource" }
     }
 ]

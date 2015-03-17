@@ -40,7 +40,7 @@ dialyzer: compile
 	dialyzer --plt $(COMBO_PLT) ebin
 
 dev: compile
-	erl -pa ebin -pa deps/*/ebin \
+	erl -pa ebin -pa deps/*/ebin -pa test \
 	-eval "application:ensure_all_started(dobby_oflib)."
 
 compile test clean: rebar
