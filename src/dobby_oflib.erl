@@ -14,6 +14,9 @@
 -include_lib("dobby_clib/include/dobby.hrl").
 -include("dobby_oflib.hrl").
 
+-define(MD_VALUE(V), #{value := V}).
+-define(TYPE(V), #{<<"type">> := #{value := V}}).
+
 %%%=============================================================================
 %%% External functions
 %%%=============================================================================
@@ -30,6 +33,7 @@ get_path(SrcEndpoint, DstEndpoint) ->
         Path = [_|_] ->
             Digraph = digraph:new(),
             insert_path(Path, Digraph),
+            add_flow_tables_and_mods(Path, Digraph),
             {ok, Digraph};
         not_found ->
             {error, no_path}
@@ -118,12 +122,14 @@ reconstruct_flow_path(FlowPath0) ->
 
 %% This function returns a function to be passed to dby:search.
 vertices_edges_search_fun(Ep1, Ep2) ->
-    fun(Id, #{<<"type">> := <<"endpoint">>}, [], Acc) when Id =:= Ep1 ->
+    fun(Id, #{<<"type">> := ?MD_VALUE(<<"endpoint">>)}, [], Acc) when Id =:= Ep1 ->
             %% This is the starting point.
             {continue, Acc};
        (Id,
-        #{<<"type">> := <<"endpoint">>} = NodeMetadata,
-        [{_, #{<<"type">> := <<"of_port">>}, #{<<"type">> := <<"connected_to">>}} | _] = Path,
+        #{<<"type">> := ?MD_VALUE(<<"endpoint">>)} = NodeMetadata,
+        [{_,
+          #{<<"type">> := ?MD_VALUE(<<"of_port">>)},
+          #{<<"type">> := ?MD_VALUE(<<"connected_to">>)}} | _] = Path,
         Acc) ->
             %% We've found an endpoint.  That's only interesting if
             %% it's the endpoint we're looking for.
@@ -134,9 +140,9 @@ vertices_edges_search_fun(Ep1, Ep2) ->
                     %% Otherwise, keep going.
                     {skip, Acc}
             end;
-       (_Id,
-        #{<<"type">> := Type2},
-        [{_, #{<<"type">> := Type1}, #{<<"type">> := EdgeType}} | _],
+       (Id,
+        #{<<"type">> := Type2} = NodeMadata,
+        [{_, #{<<"type">> := Type1}, #{<<"type">> := EdgeType}} | _] = Path,
         Acc) ->
             case valid_edge(Type1, EdgeType, Type2) of
                 true ->
@@ -152,6 +158,8 @@ vertices_edges_search_fun(Ep1, Ep2) ->
 %% @doc
 %% Return true if we should follow an edge of type `EdgeType' from a
 %% node of type `Node1Type' to a node of type `Node2Type'.
+valid_edge(#{value := NodeType1}, #{value := EdgeType}, #{value := NodeType2}) ->
+    valid_edge(NodeType1, EdgeType, NodeType2);
 valid_edge(<<"endpoint">>, <<"connected_to">>, <<"of_port">>) ->
     true;
 valid_edge(<<"of_port">>, <<"port_of">>, <<"of_switch">>) ->
@@ -180,3 +188,45 @@ insert_path([{NodeId, NodeMetadata, NextEdgeMetadata} | Rest],
     digraph:add_edge(Digraph, PreviousNodeId, NodeId, EdgeMetadata),
     digraph:add_edge(Digraph, NodeId, PreviousNodeId, EdgeMetadata),
     insert_path(Rest, NodeId, NextEdgeMetadata, Digraph).
+
+add_flow_tables_and_mods(Path, Digraph) ->
+    SwitchesIds = switches_ids(Path, []),
+    ModsAndTables = collect_flow_tables_and_mods(SwitchesIds, []),
+    extend_digraph(ModsAndTables, Digraph).
+
+
+switches_ids([{NodeId, #{<<"type">> := ValueMap}, _} | Rest], Acc) ->
+    case maps:get(value, ValueMap) of
+        <<"of_switch">> ->
+            switches_ids(Rest, [NodeId | Acc]);
+        _ ->
+            switches_ids(Rest, Acc)
+    end;
+switches_ids([], Acc) ->
+    Acc.
+
+collect_flow_tables_and_mods([SwId | Rest], Acc) ->
+    SearchFun = gather_flow_table_with_flow_mods_fun(SwId),
+    FtsAndFms = dby:search(SearchFun, [], SwId, [breadth, {max_depth, 2}]),
+    collect_flow_tables_and_mods(Rest, [lists:reverse(FtsAndFms) | Acc]);
+collect_flow_tables_and_mods([], Acc) ->
+    lists:flatten(Acc).
+
+gather_flow_table_with_flow_mods_fun(SwitchId) ->
+    fun(Id, _, [], Acc) when Id =:= SwitchId ->
+            {continue, Acc};
+       (FtId, ?TYPE(<<"of_flow_table">>) = IdMd, [{_, _, LinkMd}], Acc) ->
+            {continue, [{SwitchId, LinkMd, FtId, IdMd} | Acc]};
+       (FmId, ?TYPE(<<"of_flow_mod">>) = IdMd, [{FtId, _, LinkMd} | _], Acc) ->
+            {continue, [{FtId, LinkMd, FmId, IdMd} | Acc]};
+       (_, _, _, Acc) ->
+            {skip, Acc}
+    end.
+
+extend_digraph([{ExistingNodeId, LinkMd, NodeId, NodeMd} | Rest], Digraph) ->
+    digraph:add_vertex(Digraph, NodeId, NodeMd),
+    digraph:add_edge(Digraph, ExistingNodeId, NodeId, LinkMd),
+    digraph:add_edge(Digraph, NodeId, ExistingNodeId, LinkMd),
+    extend_digraph(Rest, Digraph);
+extend_digraph([], _Digraph) ->
+    ok.
