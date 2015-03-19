@@ -34,10 +34,12 @@ init_per_suite(Config) ->
             Config
     end.
 
-init_per_testcase(should_find_flow_table_identifers, Config) ->
-    TopFilename = ?config(data_dir, Config) ++ "topo.json",
+init_per_testcase(Case, Config) when
+      Case =:= should_find_flow_table_identifers;
+      Case =:= should_return_path_with_flow_mods ->
+    TopFilename = ?config(data_dir, Config) ++ "daisychain-3.json",
     dby_bulk:import(json0, TopFilename),
-    Config;
+    daisychain_identifiers() ++  Config;
 init_per_testcase(_, Config) ->
     mock_flow_table_identifiers(),
     Config.
@@ -47,9 +49,15 @@ end_per_testcase(_, Config) ->
     Config.
 
 all() ->
-    [should_publish_net_flow,
-     should_find_flow_table_identifers,
-     should_publish_flow_path].
+    [should_return_path_with_flow_mods].
+    %% [should_publish_net_flow,
+    %%  should_find_flow_table_identifers,
+%%  should_publish_flow_path].
+
+daisychain_identifiers() ->
+    [{endpoints, {<<"EP1">>, <<"EP2">>}},
+     {of_switches, [<<"00:00:00:00:00:01:00:01">>,
+                    <<"00:00:00:00:00:01:00:02">>]}].
 
 %%%=============================================================================
 %%% Testcases
@@ -86,7 +94,7 @@ should_publish_flow_path(_Config) ->
 
 should_find_flow_table_identifers(_Config) ->
     %% GIVEN
-    Dpid = <<"OFS1">>,
+    Dpid = <<"00:00:00:00:00:01:00:01">>,
     FlowMod = {_Matches = [], _Actions = [], [{table_id, 0}]},
 
     %% WHEN
@@ -94,6 +102,38 @@ should_find_flow_table_identifers(_Config) ->
 
     %% THEN
     ?assertEqual(<<"OFS1-table-0">>, Id).
+
+should_return_path_with_flow_mods(Config) ->
+    %% GIVEN
+    {Ep1, Ep2} = ?config(endpoints, Config),
+    FlowPath = dofl_test_utils:flow_path(),
+    publish_net_flow(Ep1, Ep2, FlowPath),
+
+    %% WHEN
+    {ok, G} = dobby_oflib:get_path(Ep1, Ep2),
+
+    %% THEN
+    assert_digraph_has_flow_mods(G, FlowPath, Config).
+
+%%%=============================================================================
+%%% Assertions
+%%%=============================================================================
+
+assert_digraph_has_flow_mods(Digraph, FlowPath, Config) ->
+    SwitchesIds = ?config(of_switches, Config),
+    [begin
+         {_OFVersion, FlowMods} = proplists:get_value(SwId, FlowPath),
+         EachFlowModConnectedFun =
+             fun(FlowMod) ->
+                     {_Matches, _Instructions, Opts} = FlowMod,
+                     FlowModId = proplists:get_value(cookie, Opts),
+                     assert_path_exists(Digraph, SwId, FlowModId)
+             end,
+         lists:foreach(EachFlowModConnectedFun, FlowMods)
+     end || SwId <- SwitchesIds].
+
+assert_path_exists(Digraph, Src, Dst) ->
+    ?assert(false /= digraph:get_path(Digraph, Src, Dst)).
 
 %%%=============================================================================
 %%% Internal functions
@@ -118,6 +158,9 @@ publish_endpoints() ->
     [dby:publish(
        ?PUBLISHER_ID, {EP, [{<<"type">>, <<"endpoint">>}]}, [persistent])
      || EP <- [?SRC_EP, ?DST_EP]].
+
+publish_net_flow(Src, Dst, FlowPath) ->
+    dobby_oflib:publish_new_flow(?PUBLISHER_ID, Src, Dst, FlowPath).
 
 mk_net_flow_fun(DstEndpoint) ->
     fun(Identifier, _IdMetadataInfo, [], _) ->
