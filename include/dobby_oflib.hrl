@@ -4,13 +4,11 @@
 %%%=============================================================================
 %% Add includes and records
 
--type flow_path() :: [#{DatapathId :: binary() =>
-                                      list({OFVersion :: 4 | 5, [flow_mod()]})
-                       }].
-
 -type of_version() :: 4 | 5.
 
 -type flow_mod() :: {Matches :: [term()],
                      Instructions :: [term()],
                      Opts :: [term()]}.
+
+-type datapath_flow_mod() :: {dby_identifier(), of_version(), flow_mod()}.
 

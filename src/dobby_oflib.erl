@@ -9,7 +9,8 @@
 
 %% API
 -export([get_path/2,
-         publish_new_flow/4]).
+         publish_dp_flow_mod/2,
+         publish_net_flow/4]).
 
 -include_lib("dobby_clib/include/dobby.hrl").
 -include("dobby_oflib.hrl").
@@ -39,29 +40,49 @@ get_path(SrcEndpoint, DstEndpoint) ->
             {error, no_path}
     end.
 
-%% @doc Publish a Net Flow between two endpoints to Dobby.
+%% @doc Publish a NetFlow between two endpoints to Dobby.
 %%
 %% Publishes a NetFlow identifier between `SrcEndpoint' and `DstEndpoint'
-%% that are assumed to be present in Dobby database. It also publishes
-%% `FlowPath' that is set of links and identifiers representing OpenFlow
-%% entities that provide logical connectivity between the two endpoints.
-%% The first and the last identifiers of the `FlowPath' hang off
-%% the Net Flow Identifier and their connections to it indicate the beginning
-%% an the end of the `FlowPath'.
+%% that are assumed to be present in Dobby database. It also connects
+%% the FlowMods Identifiers to form a path that a packet would traverse
+%% from the `SrcEndpoint' to the `DstEndpoint'. The first and the last
+%% FlowMod identifiers are connected to the NetFlow Identifier.
 %%
-%% The function returns Net Flow Identifier: `NetFlowId' that can be
+%% The function returns NetFlow identifier `NetFlowId' that can be
 %% used for referencing published Net Flow.
--spec publish_new_flow(binary(), dby_identifier(), dby_identifier(), flow_path())
-                      -> Result when
+-spec publish_net_flow(publisher_id(), dby_identifier(), dby_identifier(),
+                       [dby_identifier()]) -> Result when
       Result :: {ok, NetFlowId :: dby_endpoint()}
               | {error, Reason :: term()}.
 
-publish_new_flow(PublisherId, SrcEndpoint, DstEndpoint, FlowPath) ->
+publish_net_flow(PublisherId, SrcEndpoint, DstEndpoint, FlowModsIds) ->
     NfId = publish_net_flow_identifier(PublisherId, SrcEndpoint, DstEndpoint),
-    publish_flow_path(PublisherId, NfId, FlowPath),
+    publish_flow_path(PublisherId, NfId, FlowModsIds),
     lager:info("Published NetFlow: ~p between endpoints src: ~p dst: ~p ~n",
                [NfId, SrcEndpoint, DstEndpoint]),
     {ok, NfId}.
+
+
+%% @doc Publish a FlowMod for a Datapath.
+%%
+%% Publishes a FlowMod identifier for a given Datapath. The FlowMod is
+%% not directly connected to the Datapath identifier bot to the appropriate
+%% FlowTable identifier. The FlowMod identifier is also marked with appropriate
+%% OpenFlow version.
+%%
+%% The function returns the FlowMod identifier that can be later used
+%% for publishing a NetFlow.
+-spec publish_dp_flow_mod(dby_identifier(), datapath_flow_mod()) -> Result when
+      Result :: {ok, DpFlowModId :: dby_identifier()}
+              | {error, Reason :: term()}.
+
+publish_dp_flow_mod(PublisherId, {DatapahtId, _, FlowMod} = DatapathFlowMod) ->
+    FtId = dofl_identifier:flow_table(DatapahtId, FlowMod),
+    publish(PublisherId,
+            FtId,
+            {FmId, _} = _FmIdWithMd = flow_mod_identifier(DatapathFlowMod),
+            dofl_link_metadata:flow_mod_with_flow_table()),
+    {ok, FmId}.
 
 %%%=============================================================================
 %%% Internal functions
@@ -75,50 +96,27 @@ publish_net_flow_identifier(PublisherId, Src, Dst) ->
             dofl_link_metadata:endpoint_with_net_flow(NfId)),
     NfId.
 
-publish_flow_path(PublisherId, NetFlowId, FlowPath0) ->
-    FlowPath1 = reconstruct_flow_path(FlowPath0),
-    publish_flow_path(PublisherId, NetFlowId, FlowPath1, NetFlowId).
+publish_flow_path(PublisherId, NetFlowId, FlowModsIds) ->
+    Fun = fun(FmId, PrevId) ->
+                  LinkMd = of_path_link_md(PrevId, FmId, NetFlowId),
+                  publish(PublisherId, PrevId, FmId, LinkMd),
+                  FmId
+          end,
+    LastFmId = lists:foldl(Fun, NetFlowId, FlowModsIds),
+    LinkMd = of_path_link_md(LastFmId, NetFlowId, NetFlowId),
+    publish(PublisherId, LastFmId, NetFlowId, LinkMd).
 
-publish_flow_path(PublisherId, NetFlowId, [ExtendedFlowMod | T], LastId)
-  when LastId =:= NetFlowId ->
-    publish(PublisherId,
-            NetFlowId,
-            {Id, _Md} = flow_mod_identifier(ExtendedFlowMod),
-            dofl_link_metadata:net_flow_with_flow_mod(NetFlowId, NetFlowId)),
-    publish(PublisherId,
-            Id,
-            flow_table_identifier(ExtendedFlowMod),
-            dofl_link_metadata:flow_mod_with_flow_table()),
-    publish_flow_path(PublisherId, NetFlowId, T, Id);
-publish_flow_path(PublisherId, NetFlowId, [ExtendedFlowMod | T], LastId) ->
-    publish(PublisherId,
-            LastId,
-            {Id, _Md} = flow_mod_identifier(ExtendedFlowMod),
-            dofl_link_metadata:between_flow_mods(LastId, NetFlowId)),
-    publish(PublisherId,
-            Id,
-            flow_table_identifier(ExtendedFlowMod),
-            dofl_link_metadata:flow_mod_with_flow_table()),
-    publish_flow_path(PublisherId, NetFlowId, T, Id);
-publish_flow_path(PublisherId, NetFlowId, [], LastId) ->
-    publish(PublisherId, LastId, NetFlowId,
-            dofl_link_metadata:net_flow_with_flow_mod(LastId, NetFlowId)).
+of_path_link_md(Src, Dst, NetFlowId)
+  when Src =:= NetFlowId; Dst =:= NetFlowId ->
+    dofl_link_metadata:net_flow_with_flow_mod(Src, NetFlowId);
+of_path_link_md(Src, _, NetFlowId) ->
+    dofl_link_metadata:between_flow_mods(Src, NetFlowId).
 
 flow_mod_identifier({Dpid, OFVersion, FlowMod}) ->
     dofl_identifier:flow_mod(Dpid, OFVersion, FlowMod).
 
-flow_table_identifier({Dpid, _OFVersion, FlowMod}) ->
-    dofl_identifier:flow_table(Dpid, FlowMod).
-
 publish(PublisherId, Src, Dst, LinkMetadata) ->
     dofl_publish:do(PublisherId, Src, Dst, LinkMetadata).
-
-reconstruct_flow_path(FlowPath0) ->
-    Fun = fun({Dpid, {OFVersion, FlowMods}}) ->
-                  [{Dpid, OFVersion, FM} || FM <- FlowMods]
-          end,
-    FlowPath1 = lists:map(Fun, FlowPath0),
-    lists:flatten(FlowPath1).
 
 %% This function returns a function to be passed to dby:search.
 vertices_edges_search_fun(Ep1, Ep2) ->
@@ -140,9 +138,9 @@ vertices_edges_search_fun(Ep1, Ep2) ->
                     %% Otherwise, keep going.
                     {skip, Acc}
             end;
-       (Id,
-        #{<<"type">> := Type2} = NodeMadata,
-        [{_, #{<<"type">> := Type1}, #{<<"type">> := EdgeType}} | _] = Path,
+       (_Id,
+        #{<<"type">> := Type2} = _NodeMadata,
+        [{_, #{<<"type">> := Type1}, #{<<"type">> := EdgeType}} | _] = _Path,
         Acc) ->
             case valid_edge(Type1, EdgeType, Type2) of
                 true ->
