@@ -12,6 +12,7 @@
          flow_path/0,
          flow_path_to_identifiers/1,
          flow_mod/0,
+         flow_mod/1,
          flow_mod_to_table_no/1]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -69,6 +70,14 @@ flow_mod() ->
      [{table_id, 0}, {priority, 100},
       {idle_timeout, 0}, {idle_timeout, 0},
       {cookie, <<0,0,0,0,0,0,0,102>>},
+      {cookie_mask, <<0,0,0,0,0,0,0,0>>}]}.
+
+flow_mod(Cookie) ->
+    {[{in_port,2}],
+     [{apply_actions,[{output,1,no_buffer}]}],
+     [{table_id, 0}, {priority, 100},
+      {idle_timeout, 0}, {idle_timeout, 0},
+      {cookie, Cookie},
       {cookie_mask, <<0,0,0,0,0,0,0,0>>}]}.
 
 flow_mod_to_table_no({_Matches, _Actions, Opts}) ->

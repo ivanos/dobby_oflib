@@ -49,10 +49,10 @@ end_per_testcase(_, Config) ->
     Config.
 
 all() ->
-    [should_return_path_with_flow_mods].
-    %% [should_publish_net_flow,
-    %%  should_find_flow_table_identifers,
-%%  should_publish_flow_path].
+    [should_return_path_with_flow_mods,
+     should_publish_net_flow,
+     should_find_flow_table_identifers,
+     should_publish_flow_path].
 
 daisychain_identifiers() ->
     [{endpoints, {<<"EP1">>, <<"EP2">>}},

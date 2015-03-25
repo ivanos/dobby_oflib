@@ -15,6 +15,10 @@
 -define(SRC_EP, <<"Src">>).
 -define(DST_EP, <<"Dst">>).
 -define(PUBLISHER_ID, <<"Publisher">>).
+-define(DPID, <<"00:00:00:00:00:01:00:01">>).
+-define(OF_VERSION, 4).
+-define(FM_COOKIE, <<0,0,0,0,0,0,0,10>>).
+-define(FM_COOKIE2, <<0,0,0,0,0,0,0,12>>).
 
 %%%=============================================================================
 %%% Callbacks
@@ -30,48 +34,52 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(_Config) ->
-    unmock_dobby(),
     unmock_flow_table_identifiers(),
+    unmock_dobby(),
     ok.
 
 all() ->
-    [should_publish_net_flow,
-     should_publish_flow_path].
+    [it_publishes_net_flow,
+     it_publishes_flow_mod].
 
 %%%=============================================================================
 %%% Testcases
 %%%=============================================================================
 
-should_publish_net_flow(_Config) ->
+it_publishes_net_flow(_Config) ->
     %% GIVEN
-    FlowPath = dofl_test_utils:flow_path(),
+    FlowModsIds = [?FM_COOKIE, ?FM_COOKIE2],
 
     %% WHEN
-    {ok, NetFlowId} = dobby_oflib:publish_new_flow(?PUBLISHER_ID,
+    {ok, NetFlowId} = dobby_oflib:publish_net_flow(?PUBLISHER_ID,
                                                    ?SRC_EP,
                                                    ?DST_EP,
-                                                   FlowPath),
+                                                   FlowModsIds),
 
     %% THEN
-    assert_net_flow_published(?PUBLISHER_ID, ?SRC_EP, ?DST_EP, NetFlowId).
+    assert_net_flow_published(?PUBLISHER_ID, ?SRC_EP, ?DST_EP, NetFlowId),
+    assert_flow_path_published(?PUBLISHER_ID, NetFlowId, FlowModsIds).
 
-should_publish_flow_path(_Config) ->
+it_publishes_flow_mod(_Config) ->
     %% GIVEN
-    FlowPath0 = dofl_test_utils:flow_path(),
-    FlowPath1 = reconstruct_flow_path(FlowPath0),
+    DpFlowMod = {?DPID, ?OF_VERSION, dofl_test_utils:flow_mod(?FM_COOKIE)},
 
     %% WHEN
-    {ok, NetFlowId} = dobby_oflib:publish_new_flow(?PUBLISHER_ID,
-                                                   ?SRC_EP,
-                                                   ?DST_EP,
-                                                   FlowPath0),
+    {ok, FlowModId} = dobby_oflib:publish_dp_flow_mod(?PUBLISHER_ID, DpFlowMod),
 
     %% THEN
-    assert_flow_path_published(?PUBLISHER_ID, NetFlowId, FlowPath1).
+    assert_flow_mod_published(?PUBLISHER_ID, FlowModId, DpFlowMod).
 
 %%%=============================================================================
 %%% Assertions
 %%%=============================================================================
+
+assert_flow_mod_published(PublisherId, PublishedFMId, DpFlowMod) ->
+    OFResourceArgs = [flow_table_identifier(DpFlowMod),
+                      {ExpectedFMId, _} = flow_mod_identifier(DpFlowMod),
+                      link_metadata(of_resource)],
+    ?assertEqual(ExpectedFMId, PublishedFMId),
+    assert_dby_publish_called([PublisherId | OFResourceArgs]).
 
 assert_net_flow_published(PublisherId, SrcEP, DstEP, NetFlowId) ->
     [assert_dby_publish_called([PublisherId, Src, Dst,
@@ -79,38 +87,19 @@ assert_net_flow_published(PublisherId, SrcEP, DstEP, NetFlowId) ->
      || {Src, Dst} <- [{SrcEP, net_flow_identifier(NetFlowId)},
                        {NetFlowId, DstEP}]].
 
+assert_flow_path_published(PubId, NetFlowId, FlowModsIds) ->
+    Fun = fun(FmId, PrevId) ->
+                  LinkType = flow_path_link_type(PrevId, NetFlowId),
+                  LinkMd = link_metadata({LinkType, PrevId, NetFlowId}),
+                  assert_dby_publish_called([PubId, PrevId, FmId, LinkMd]),
+                  FmId
+          end,
+    LastFmId = lists:foldl(Fun, NetFlowId, FlowModsIds),
+    LinkMd = link_metadata({of_path_ends_at, LastFmId, NetFlowId}),
+    assert_dby_publish_called([PubId, LastFmId, NetFlowId, LinkMd]).
+
 assert_dby_publish_called(Args) ->
     ?assert(meck:called(dby, publish, Args ++ [[persistent]])).
-
-assert_flow_path_published(PublisherId, NetFlowId, FlowPath) ->
-    assert_flow_path_published(PublisherId, NetFlowId, FlowPath,
-                               _PrevId = NetFlowId).
-
-assert_flow_path_published(PublisherId, NetFlowId, [FlowMod | T], NetFlowId) ->
-    OFPathArgs = [NetFlowId,
-                  {FmId, _FmMd} = flow_mod_identifier(FlowMod),
-                  link_metadata({of_path_starts_at, NetFlowId, NetFlowId})],
-    OFResourceArgs = [FmId,
-                      flow_table_identifier(FlowMod),
-                      link_metadata(of_resource)],
-    [assert_dby_publish_called([PublisherId | Args])
-     || Args <- [OFPathArgs, OFResourceArgs]],
-    assert_flow_path_published(PublisherId, NetFlowId, T, FmId);
-assert_flow_path_published(PublisherId, NetFlowId, [FlowMod | T], LastId) ->
-    OFPathArgs = [LastId,
-                  {FmId,_FmMd} = flow_mod_identifier(FlowMod),
-                  link_metadata({of_path_forwards_to, LastId, NetFlowId})],
-    OFResourceArgs = [FmId,
-                      flow_table_identifier(FlowMod),
-                      link_metadata(of_resource)],
-    [assert_dby_publish_called([PublisherId | Args])
-     || Args <- [OFPathArgs, OFResourceArgs]],
-    assert_flow_path_published(PublisherId, NetFlowId, T, FmId);
-assert_flow_path_published(PublisherId, NetFlowId, [], LastId) ->
-    OFPathArgs = [LastId,
-                  NetFlowId,
-                  link_metadata({of_path_ends_at, LastId, NetFlowId})],
-    assert_dby_publish_called([PublisherId | OFPathArgs]).
 
 %%%=============================================================================
 %%% Internal functions
@@ -124,23 +113,22 @@ unmock_dobby() ->
 
 mock_flow_table_identifiers() ->
     ok = meck:expect(dofl_identifier, flow_table,
-                     fun(Dpid, _FlowMod = {_, _, Opts}) ->
-                             TableNo = proplists:get_value(table_id, Opts),
-                             TableNoBin = integer_to_binary(TableNo),
-                             <<Dpid/binary, ":", TableNoBin/binary>>
+                     fun(Dpid, FlowMod) ->
+                             flow_table_identifier({Dpid, 4, FlowMod})
                      end).
 
 unmock_flow_table_identifiers() ->
     ok = meck:unload(dofl_identifier).
 
-flow_mod_identifier({Dpid, OFVersion, _FlowTableId, FlowMod}) ->
+flow_mod_identifier({Dpid, OFVersion, FlowMod}) ->
     {_Matches, _Instructions, Opts} = FlowMod,
     Cookie = proplists:get_value(cookie, Opts),
     {Cookie, [{<<"type">>, <<"of_flow_mod">>},
               {<<"dpid">>, Dpid},
               {<<"of_version">>, OFVersion}]}.
 
-flow_table_identifier({Dpid, _OFVersion, TableNo, _FlowMod}) ->
+flow_table_identifier({Dpid, _OFVersion, FlowMod}) ->
+    TableNo = proplists:get_value(table_id, _Opts = element(3, FlowMod)),
     TableNoBin = integer_to_binary(TableNo),
     <<Dpid/binary, ":", TableNoBin/binary>>.
 
@@ -157,18 +145,15 @@ link_metadata({Type, Src, NetFlowId}) ->
 link_metadata(Type) ->
     [{<<"type">>, atom_to_binary(Type, utf8)}].
 
-reconstruct_flow_path(FlowPath0) ->
-    Fun = fun({Dpid, {OFVersion, FlowMods}}) ->
-                  [reconstruct_flow_mod(Dpid, OFVersion, FM) || FM <- FlowMods]
-          end,
-    FlowPath1 = lists:map(Fun, FlowPath0),
-    lists:flatten(FlowPath1).
-
-reconstruct_flow_mod(Dpid, OFVersion, FlowMod) ->
-    TableNo = proplists:get_value(table_id, _Opts = element(3, FlowMod)),
-    {Dpid, OFVersion, TableNo, FlowMod}.
-
 trace_dby_publish() ->
     {module, M} = code:ensure_loaded(M = dby),
     ct:pal("Matched traces: ~p~n",
            [recon_trace:calls({dby, publish, '_'}, 10, [{pid, all}])]).
+
+flow_path_link_type(PrevId, NetFlowId) ->
+    case PrevId of
+        NetFlowId ->
+            of_path_starts_at;
+        _ ->
+            of_path_forwards_to
+    end.

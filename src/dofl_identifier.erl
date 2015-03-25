@@ -21,12 +21,14 @@
 %%% External functions
 %%%=============================================================================
 
--spec net_flow(dby_identifier(), dby_identifier()) -> dby_endpoint().
+-spec net_flow(dby_identifier(), dby_identifier()) ->
+                      {dby_identifier(), [tuple()]}.
 
 net_flow(Src, Dst) ->
     {<<"NF:", Src/binary, ":", Dst/binary>>, [{type, of_net_flow}]}.
 
--spec flow_mod(dby_identifier(), of_version(), flow_mod()) -> dby_endpoint().
+-spec flow_mod(dby_identifier(), of_version(), flow_mod()) ->
+                      {dby_identifier(), [tuple()]}.
 
 flow_mod(Dpid, OFVersion, FlowMod) ->
     {_Matches, _Instructions, Opts} = FlowMod,
@@ -34,7 +36,8 @@ flow_mod(Dpid, OFVersion, FlowMod) ->
     {Cookie, [{type, of_flow_mod}, {dpid, Dpid}, {of_version, OFVersion}]}.
 
 
--spec flow_table(dby_identifier(), flow_mod()) -> dby_identifier().
+-spec flow_table(dby_identifier(), flow_mod()) ->
+                        dby_identifier() | {error, Reason :: term()}.
 
 flow_table(DatapahtId, {_Matches, _Actions, Opts}) ->
     TableNo = proplists:get_value(table_id, Opts),

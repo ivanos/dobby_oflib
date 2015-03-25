@@ -21,13 +21,13 @@
 %%% External functions
 %%%=============================================================================
 
--spec endpoint_with_net_flow(dby_identifier()) -> map().
+-spec endpoint_with_net_flow(dby_identifier()) -> [tuple()].
 
 endpoint_with_net_flow(Src) ->
     [{type, ep_to_nf}, {src, Src}].
 
 
--spec net_flow_with_flow_mod(dby_identifier(), dby_identifier()) -> map().
+-spec net_flow_with_flow_mod(dby_identifier(), dby_identifier()) -> [tuple()].
 
 net_flow_with_flow_mod(Src, NetFlowId) when Src =:= NetFlowId ->
     of_path_link_metadata(of_path_starts_at, Src, [NetFlowId]);
@@ -35,13 +35,13 @@ net_flow_with_flow_mod(Src, NetFlowId) ->
     of_path_link_metadata(of_path_ends_at, Src, [NetFlowId]).
 
 
--spec between_flow_mods(dby_identifier(), dby_identifier()) -> map().
+-spec between_flow_mods(dby_identifier(), dby_identifier()) -> [tuple()].
 
 between_flow_mods(Src, NetFlowId) ->
     of_path_link_metadata(of_path_forwards_to, Src, [NetFlowId]).
 
 
--spec flow_mod_with_flow_table() -> map().
+-spec flow_mod_with_flow_table() -> [tuple()].
 
 flow_mod_with_flow_table() ->
     [{type, of_resource}].
