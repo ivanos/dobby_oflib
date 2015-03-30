@@ -12,9 +12,11 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--define(SRC_EP, <<"SRC">>).
--define(DST_EP, <<"DST">>).
 -define(PUBLISHER_ID, <<"PUBLISHER">>).
+-define(FM_COOKIE(X), <<0,0,0,0,0,0,0,X>>).
+-define(OF_VERSION, 4).
+-define(TYPE(V), #{<<"type">> := #{value := V}}).
+-define(FLOW_MOD_MD, [<<"type">>, <<"of_version">>, <<"dpid">>]).
 
 %%%=============================================================================
 %%% Callbacks
@@ -25,142 +27,154 @@ suite() ->
     [{timetrap,{minutes,10}}].
 
 init_per_suite(Config) ->
-    start_applications(),
-    case is_dobby_server_running() of
-        false ->
-            ct:pal(Reason = "Dobby server is not running"),
-            {skip, Reason};
-        true ->
-            Config
-    end.
+    {ok, _} = application:ensure_all_started(dobby_oflib),
+    Config1 = add_topo_filename(Config),
+    add_topo_identifiers(Config1).
 
-init_per_testcase(Case, Config) when
-      Case =:= should_find_flow_table_identifers;
-      Case =:= should_return_path_with_flow_mods ->
-    TopFilename = ?config(data_dir, Config) ++ "daisychain-3.json",
-    dby_bulk:import(json0, TopFilename),
-    daisychain_identifiers() ++  Config;
-init_per_testcase(_, Config) ->
-    mock_flow_table_identifiers(),
-    Config.
-
-end_per_testcase(_, Config) ->
-    meck:unload(),
-    Config.
+end_per_suite(_Config) ->
+    application:stop(dobby),
+    application:stop(dobby_oflib).
 
 all() ->
-    [should_return_path_with_flow_mods,
-     should_publish_net_flow,
-     should_find_flow_table_identifers,
-     should_publish_flow_path].
+    [it_publishes_flow_mod,
+     it_publishes_net_flow,
+     it_finds_flow_table_identifers,
+     it_returns_path_with_flow_mods].
 
-daisychain_identifiers() ->
-    [{endpoints, {<<"EP1">>, <<"EP2">>}},
-     {of_switches, [<<"00:00:00:00:00:01:00:01">>,
-                    <<"00:00:00:00:00:01:00:02">>]}].
 
 %%%=============================================================================
 %%% Testcases
 %%%=============================================================================
 
-should_publish_net_flow(_Config) ->
+it_publishes_flow_mod(Config) ->
     %% GIVEN
-    FlowPath = dofl_test_utils:flow_path(),
-    publish_endpoints(),
+    setup_dobby(Config),
+    [DpId, _] = ?config(datapath_ids, Config),
+    DpFlowMod = dp_flow_mod(DpId, ?FM_COOKIE(10)),
 
     %% WHEN
-    {ok, NetFlowId} = dobby_oflib:publish_new_flow(?PUBLISHER_ID, ?SRC_EP, ?DST_EP, FlowPath),
-    Expected = [?SRC_EP, NetFlowId, ?DST_EP],
-
-    %% %% THEN
-    Fun = mk_net_flow_fun(?DST_EP),
-    Actual = dby:search(Fun, [], ?SRC_EP, [depth, {max_depth, 10}, {loop, link}]),
-    ?assertEqual(Expected, Actual).
-
-should_publish_flow_path(_Config) ->
-    %% GIVEN
-    FlowPath = dofl_test_utils:flow_path(),
-    FlowPathIds = dofl_test_utils:flow_path_to_identifiers(FlowPath),
-    publish_endpoints(),
-
-    %% WHEN
-    {ok, NetFlowId} = dobby_oflib:publish_new_flow(?PUBLISHER_ID, ?SRC_EP, ?DST_EP, FlowPath),
-    Expected = lists:flatten([NetFlowId, FlowPathIds, NetFlowId]),
-
-    %% %% THEN
-    Fun = mk_flow_path_fun(NetFlowId),
-    Actual = dby:search(Fun, [], NetFlowId, [breadth, {max_depth, 10}, {loop, link}]),
-    ?assertEqual(Expected, Actual).
-
-should_find_flow_table_identifers(_Config) ->
-    %% GIVEN
-    Dpid = <<"00:00:00:00:00:01:00:01">>,
-    FlowMod = {_Matches = [], _Actions = [], [{table_id, 0}]},
-
-    %% WHEN
-    Id = dofl_identifier:flow_table(Dpid, FlowMod),
+    {ok, PublishedFmId} = dobby_oflib:publish_dp_flow_mod(?PUBLISHER_ID,
+                                                          DpFlowMod),
 
     %% THEN
-    ?assertEqual(<<"OFS1-table-0">>, Id).
+    assert_flow_mod_identifier(DpId, PublishedFmId).
 
-should_return_path_with_flow_mods(Config) ->
+it_publishes_net_flow(Config) ->
     %% GIVEN
-    {Ep1, Ep2} = ?config(endpoints, Config),
-    FlowPath = dofl_test_utils:flow_path(),
-    publish_net_flow(Ep1, Ep2, FlowPath),
+    setup_dobby(Config),
+    [Ep1, Ep2] = ?config(endpoints, Config),
+    FlowModsIds = publish_flow_mods(?PUBLISHER_ID, Config),
+
+    %% WHEN
+    {ok, NetFlowId} =
+        dobby_oflib:publish_net_flow(?PUBLISHER_ID, Ep1, Ep2, FlowModsIds),
+
+    %% THEN
+    assert_net_flow_identifier(Ep1, Ep2, NetFlowId).
+%% assert_flow_path(NetFlowId, FlowModsIds)
+
+it_finds_flow_table_identifers(Config) ->
+    %% GIVEN
+    [Dpid | _] = ?config(datapath_ids, Config),
+    DpidToFt = ?config(dpid_to_flow_table, Config),
+    {FtId, FtNo} = maps:get(Dpid, DpidToFt),
+
+    %% WHEN
+    Id = dofl_identifier:flow_table(Dpid, flow_mod(FtNo)),
+
+    %% THEN
+    ?assertEqual(FtId, Id).
+
+it_returns_path_with_flow_mods(Config) ->
+    %% GIVEN
+    setup_dobby(Config),
+    [Ep1, Ep2] = ?config(endpoints, Config),
+    FlowModsIds = publish_flow_mods(?PUBLISHER_ID, Config),
 
     %% WHEN
     {ok, G} = dobby_oflib:get_path(Ep1, Ep2),
 
     %% THEN
-    assert_digraph_has_flow_mods(G, FlowPath, Config).
+    assert_digraph_has_flow_mods(G, FlowModsIds, Config).
 
 %%%=============================================================================
 %%% Assertions
 %%%=============================================================================
 
-assert_digraph_has_flow_mods(Digraph, FlowPath, Config) ->
-    SwitchesIds = ?config(of_switches, Config),
+assert_digraph_has_flow_mods(Digraph, FlowModsIds, Config) ->
+    SwitchesIds = ?config(datapath_ids, Config),
     [begin
-         {_OFVersion, FlowMods} = proplists:get_value(SwId, FlowPath),
          EachFlowModConnectedFun =
-             fun(FlowMod) ->
-                     {_Matches, _Instructions, Opts} = FlowMod,
-                     FlowModId = proplists:get_value(cookie, Opts),
+             fun(FlowModId) ->
                      assert_path_exists(Digraph, SwId, FlowModId)
              end,
-         lists:foreach(EachFlowModConnectedFun, FlowMods)
+         lists:foreach(EachFlowModConnectedFun, FlowModsIds)
      end || SwId <- SwitchesIds].
 
 assert_path_exists(Digraph, Src, Dst) ->
     ?assert(false /= digraph:get_path(Digraph, Src, Dst)).
 
+assert_flow_mod_identifier(DpId, PublishedFmId) ->
+    {SearchedFmId, SearchedFmMd} = dby:search(mk_flow_mod_search_fun(),
+                                              [], DpId,
+                                              [breadth, {max_depth, 2}]),
+    ?assertEqual(PublishedFmId, SearchedFmId),
+    [?assertMatch({ok, _}, maps:find(K, SearchedFmMd)) || K <- ?FLOW_MOD_MD].
+
+assert_net_flow_identifier(Src, Dst, NetFlowId) ->
+    Expected = [Src, NetFlowId, Dst],
+    Actual = dby:search(mk_net_flow_fun(Dst), [], Src,
+                        [depth, {max_depth, 10}, {loop, link}]),
+    ?assertEqual(Expected, Actual).
+
+assert_flow_path(NetFlowId, FlowModsIds) ->
+    Expected = lists:flatten([NetFlowId, FlowModsIds, NetFlowId]),
+    Actual = dby:search(mk_flow_path_fun(NetFlowId), [], NetFlowId,
+                        [breadth, {max_depth, 10}, {loop, link}]),
+    ?assertEqual(Expected, Actual).
+
 %%%=============================================================================
 %%% Internal functions
 %%%=============================================================================
 
-start_applications() ->
-    application:ensure_all_started(dobby),
-    application:ensure_all_started(dobby_oflib).
+setup_dobby(Config) ->
+    application:stop(dobby),
+    {ok, _} = application:ensure_all_started(dobby),
+    ok = dby_bulk:import(json0, ?config(add_topo_filename, Config)).
 
-is_dobby_server_running() ->
-    proplists:is_defined(dobby, application:which_applications()).
+add_topo_identifiers(Config) ->
+    [{endpoints, [<<"EP1">>, <<"EP2">>]},
+     {datapath_ids, [<<"00:00:00:00:00:01:00:01">>,
+                     <<"00:00:00:00:00:01:00:02">>]},
+     {dpid_to_flow_table,
+      #{<<"00:00:00:00:00:01:00:01">> => {<<"OFS1-table-0">>,0}}} | Config].
 
-mock_flow_table_identifiers() ->
-    ok = meck:expect(dofl_identifier, flow_table,
-                     fun(Dpid, _FlowMod = {_, _, Opts}) ->
-                             TableNo = proplists:get_value(table_id, Opts),
-                             TableNoBin = integer_to_binary(TableNo),
-                             <<Dpid/binary, ":", TableNoBin/binary>>
-                     end).
+add_topo_filename(Config) ->
+    [{add_topo_filename, ?config(data_dir, Config) ++ "daisychain-3.json"}
+     | Config].
 
-publish_endpoints() ->
-    [dby:publish(
-       ?PUBLISHER_ID, {EP, [{<<"type">>, <<"endpoint">>}]}, [persistent])
-     || EP <- [?SRC_EP, ?DST_EP]].
+publish_endpoints(PubId, Src, Dst) ->
+    [dby:publish(PubId, {EP, [{<<"type">>, <<"endpoint">>}]}, [persistent])
+     || EP <- [Src, Dst]].
 
-publish_net_flow(Src, Dst, FlowPath) ->
-    dobby_oflib:publish_new_flow(?PUBLISHER_ID, Src, Dst, FlowPath).
+dp_flow_mod(Dpid, FmCookie) ->
+    {Dpid, ?OF_VERSION, dofl_test_utils:flow_mod(FmCookie)}.
+
+publish_flow_mods(PubId, Config) ->
+    [DpId1, DpId2] = ?config(datapath_ids, Config),
+    DpFlowMods = [dp_flow_mod(DpId1, ?FM_COOKIE(10)),
+                  dp_flow_mod(DpId2, ?FM_COOKIE(20))],
+    [begin
+         {ok, FmId} = dobby_oflib:publish_dp_flow_mod(PubId, DpFm),
+         FmId
+     end || DpFm <- DpFlowMods].
+
+publish_net_flow(PubId, Src, Dst, FlowModsIds) ->
+    {ok, NfId} = dobby_oflib:publish_net_flow(PubId, Src, Dst, FlowModsIds),
+    NfId.
+
+flow_mod(FtNo) ->
+    {_Matches = [], _Actions = [], [{table_id, FtNo}]}.
 
 mk_net_flow_fun(DstEndpoint) ->
     fun(Identifier, _IdMetadataInfo, [], _) ->
@@ -176,7 +190,7 @@ mk_net_flow_fun(DstEndpoint) ->
                                 [Identifier | IdAcc]}};
                 false ->
                     {skip, Acc}
-            end
+ end
     end.
 
 mk_flow_path_fun(NetFlowId) ->
@@ -194,6 +208,17 @@ mk_flow_path_fun(NetFlowId) ->
                 false ->
                     {skip, Acc}
             end
+    end.
+
+mk_flow_mod_search_fun() ->
+    fun(_, _, [], Acc) ->
+            {continue, Acc};
+       (_, ?TYPE(<<"of_flow_table">>), _, Acc) ->
+            {continue, Acc};
+       (FlowModId, ?TYPE(<<"of_flow_mod">>) = IdMetadataInfo, _,  _Acc) ->
+            {stop, {FlowModId, IdMetadataInfo}};
+       (_, _, _, Acc) ->
+            {skip, Acc}
     end.
 
 net_flow_next_trasitions(init) ->
@@ -219,8 +244,3 @@ transition({_, _, #{<<"type">> := LinkType}}, #{<<"type">> := IdType}) ->
     {F(LinkType), F(IdType)};
 transition(_, _) ->
     unknown.
-
-trace_dby_publish() ->
-    {module, M} = code:ensure_loaded(M = dby),
-    ct:pal("Matched traces: ~p~n",
-           [recon_trace:calls({dby, publish, '_'}, 20, [{pid, all}])]).
