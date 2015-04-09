@@ -7,7 +7,6 @@
 -module(dofl_with_server_SUITE).
 -copyright("2015, Erlang Solutions Ltd.").
 
-%% Note: This directive should only be used in test suites.
 -compile(export_all).
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -28,6 +27,7 @@ suite() ->
 
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(dobby_oflib),
+    lager:set_loglevel(lager_console_backend, none),
     Config1 = add_topo_filename(Config),
     add_topo_identifiers(Config1).
 
@@ -70,8 +70,8 @@ it_publishes_net_flow(Config) ->
         dobby_oflib:publish_net_flow(?PUBLISHER_ID, Ep1, Ep2, FlowModsIds),
 
     %% THEN
-    assert_net_flow_identifier(Ep1, Ep2, NetFlowId).
-%% assert_flow_path(NetFlowId, FlowModsIds)
+    assert_net_flow_identifier(Ep1, Ep2, NetFlowId),
+    assert_flow_path(NetFlowId, FlowModsIds).
 
 it_finds_flow_table_identifers(Config) ->
     %% GIVEN
@@ -130,7 +130,7 @@ assert_net_flow_identifier(Src, Dst, NetFlowId) ->
 assert_flow_path(NetFlowId, FlowModsIds) ->
     Expected = lists:flatten([NetFlowId, FlowModsIds, NetFlowId]),
     Actual = dby:search(mk_flow_path_fun(NetFlowId), [], NetFlowId,
-                        [breadth, {max_depth, 10}, {loop, link}]),
+                        [depth, {max_depth, 10}, {loop, link}]),
     ?assertEqual(Expected, Actual).
 
 %%%=============================================================================
