@@ -18,8 +18,9 @@ eunit: compile
 ct: compile
 	./rebar -v ct $(CTARGS)
 
-distclean: clean
+deep_clean: clean
 	./rebar delete-deps
+	rm -rf logs log Mnesia.dobby_oflib*
 
 clean:
 	./rebar clean
