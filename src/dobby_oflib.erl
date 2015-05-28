@@ -160,9 +160,15 @@ valid_edge(#{value := NodeType1}, #{value := EdgeType}, #{value := NodeType2}) -
     valid_edge(NodeType1, EdgeType, NodeType2);
 valid_edge(<<"endpoint">>, <<"connected_to">>, <<"of_port">>) ->
     true;
+%% Accept both 'port_of' and 'part_of' for now; use 'part_of'
+%% exclusively at some point in the future.
 valid_edge(<<"of_port">>, <<"port_of">>, <<"of_switch">>) ->
     true;
 valid_edge(<<"of_switch">>, <<"port_of">>, <<"of_port">>) ->
+    true;
+valid_edge(<<"of_port">>, <<"part_of">>, <<"of_switch">>) ->
+    true;
+valid_edge(<<"of_switch">>, <<"part_of">>, <<"of_port">>) ->
     true;
 valid_edge(<<"of_port">>, <<"connected_to">>, <<"of_port">>) ->
     true;
