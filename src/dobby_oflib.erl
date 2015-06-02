@@ -76,8 +76,22 @@ publish_net_flow(PublisherId, SrcEndpoint, DstEndpoint, FlowModsIds) ->
       Result :: {ok, DpFlowModId :: dby_identifier()}
               | {error, Reason :: term()}.
 
-publish_dp_flow_mod(PublisherId, {DatapahtId, _, FlowMod} = DatapathFlowMod) ->
-    FtId = dofl_identifier:flow_table(DatapahtId, FlowMod),
+publish_dp_flow_mod(PublisherId, {DatapathId, _, {_, _, Opts} = FlowMod} = DatapathFlowMod) ->
+    FtId =
+        case dofl_identifier:flow_table(DatapathId, FlowMod) of
+            [] ->
+                %% No flow table node.  Let's create one.
+                %% Table id defaults to 0, to match of_msg_lib
+                TableNo = proplists:get_value(table_id, Opts, 0),
+                TableId = <<DatapathId/binary, "-table-", (integer_to_binary(TableNo))/binary>>,
+                publish(PublisherId,
+                        DatapathId,
+                        {TableId, [{type, of_flow_table}, {table_no, TableNo}]},
+                        [{type, of_resource}]),
+                TableId;
+            Id ->
+                Id
+        end,
     publish(PublisherId,
             FtId,
             {FmId, _} = _FmIdWithMd = flow_mod_identifier(DatapathFlowMod),
