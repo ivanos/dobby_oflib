@@ -40,7 +40,8 @@ flow_mod(Dpid, OFVersion, FlowMod) ->
                         dby_identifier() | {error, Reason :: term()}.
 
 flow_table(DatapahtId, {_Matches, _Actions, Opts}) ->
-    TableNo = proplists:get_value(table_id, Opts),
+    %% Table id defaults to 0, to match of_msg_lib
+    TableNo = proplists:get_value(table_id, Opts, 0),
     TableIdFun =
         fun(Dpid, _, [], _) when Dpid =:= DatapahtId ->
                 {continue, []};
