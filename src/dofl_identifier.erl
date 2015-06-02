@@ -31,10 +31,38 @@ net_flow(Src, Dst) ->
                       {dby_identifier(), [tuple()]}.
 
 flow_mod(Dpid, OFVersion, FlowMod) ->
-    {_Matches, _Instructions, Opts} = FlowMod,
+    {Matches, Instructions, Opts} = FlowMod,
     Cookie = proplists:get_value(cookie, Opts),
-    {Cookie, [{type, of_flow_mod}, {dpid, Dpid}, {of_version, OFVersion}]}.
+    %% The identifier must be a valid JSON string, so no raw cookie
+    %% binary there.
+    %% TODO: come up with better identifier for flow mods
+    {iolist_to_binary(io_lib:format("~w", [Cookie])),
+     [{type, of_flow_mod}, {dpid, Dpid}, {of_version, OFVersion},
+      {matches, encode_matches(Matches)},
+      {instructions, encode_instructions(Instructions)}]}.
 
+encode_matches(Matches) ->
+    lists:map(
+      fun(#{<<"match">> := _, <<"value">> := _} = AlreadyEncoded) ->
+              AlreadyEncoded;
+         ({Field, Value}) ->
+              #{<<"match">> => atom_to_binary(Field, utf8),
+                <<"value">> => Value}
+      end, Matches).
+
+encode_instructions(Instructions) ->
+    lists:map(
+      fun({apply_actions, Actions}) ->
+              #{<<"instruction">> => <<"apply_actions">>,
+                <<"actions">> =>
+                    lists:map(
+                      fun({output, Port, no_buffer}) ->
+                              #{<<"action">> => <<"output">>,
+                                <<"port">> => Port,
+                                <<"buffer">> => <<"no_buffer">>}
+                      end, Actions)
+               }
+      end, Instructions).
 
 -spec flow_table(dby_identifier(), flow_mod()) ->
                         dby_identifier() | {error, Reason :: term()}.
