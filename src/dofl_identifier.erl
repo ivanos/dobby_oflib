@@ -12,10 +12,16 @@
 %% API
 -export([net_flow/2,
          flow_mod/3,
-         flow_table/2]).
+         flow_table/2,
+         encode_matches/1,
+         decode_matches/1]).
 
 -include_lib("dobby_clib/include/dobby.hrl").
 -include("dobby_oflib.hrl").
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
 %%%=============================================================================
 %%% External functions
@@ -33,21 +39,54 @@ net_flow(Src, Dst) ->
 flow_mod(Dpid, OFVersion, FlowMod) ->
     {Matches, Instructions, Opts} = FlowMod,
     Cookie = proplists:get_value(cookie, Opts),
+    Priority = proplists:get_value(priority, Opts, 16#ffff),
     %% The identifier must be a valid JSON string, so no raw cookie
     %% binary there.
     %% TODO: come up with better identifier for flow mods
     {iolist_to_binary(io_lib:format("~w", [Cookie])),
      [{type, of_flow_mod}, {dpid, Dpid}, {of_version, OFVersion},
+      {priority, Priority},
       {matches, encode_matches(Matches)},
       {instructions, encode_instructions(Instructions)}]}.
 
+%% @doc Convert from of_msg_lib style matches to something that can be
+%% turned into JSON.
 encode_matches(Matches) ->
     lists:map(
       fun(#{<<"match">> := _, <<"value">> := _} = AlreadyEncoded) ->
               AlreadyEncoded;
+         ({Field, Value}) when is_binary(Value) ->
+              %% Special case for binaries: convert them to lists, so
+              %% they can be encoded as JSON.
+              #{<<"match">> => atom_to_binary(Field, utf8),
+                <<"type">> => <<"binary">>,
+                <<"value">> => binary_to_list(Value)};
          ({Field, Value}) ->
               #{<<"match">> => atom_to_binary(Field, utf8),
-                <<"value">> => Value}
+                <<"value">> => Value};
+         ({Field, Value, Mask}) when is_binary(Value), is_binary(Mask) ->
+              %% Same here: use lists for binaries.
+              %% If there's a mask, it's always a binary.
+              #{<<"match">> => atom_to_binary(Field, utf8),
+                <<"value">> => binary_to_list(Value),
+                <<"mask">> => binary_to_list(Mask)}
+      end, Matches).
+
+%% @doc Convert matches stored in Dobby to the format expected by
+%% of_msg_lib.
+decode_matches(Matches) ->
+    lists:map(
+      fun(#{<<"match">> := Field, <<"value">> := Value,
+            <<"mask">> := Mask}) ->
+              {binary_to_atom(Field, utf8),
+               list_to_binary(Value),
+               list_to_binary(Mask)};
+         (#{<<"match">> := Field, <<"value">> := Value,
+            <<"type">> := <<"binary">>}) ->
+              {binary_to_atom(Field, utf8),
+               list_to_binary(Value)};
+         (#{<<"match">> := Field, <<"value">> := Value}) ->
+              {binary_to_atom(Field, utf8), Value}
       end, Matches).
 
 encode_instructions(Instructions) ->
@@ -105,3 +144,19 @@ get_metadata_value(Key, Metadatainfo) ->
         V ->
             V
     end.
+
+%%%=============================================================================
+%%% Test cases
+%%%=============================================================================
+
+-ifdef(TEST).
+%% Ensure that encode_matches and decode_matches don't lose anything
+%% on a roundtrip.
+encode_decode_matches_test_() ->
+    TestCases =
+        [{"In port", [{in_port, 42}]}
+        ,{"IPv4 source", [{ipv4_src, <<1,2,3,4>>}]}
+        ,{"IPv4 source with mask", [{ipv4_src, <<1,2,3,4>>, <<255,255,255,0>>}]}],
+    [{Label, ?_assertEqual(TestCase, decode_matches(encode_matches(TestCase)))}
+     || {Label, TestCase} <- TestCases].
+-endif.
