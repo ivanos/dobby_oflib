@@ -99,7 +99,11 @@ assert_flow_path_published(PubId, NetFlowId, FlowModsIds) ->
     assert_dby_publish_called([PubId, LastFmId, NetFlowId, LinkMd]).
 
 assert_dby_publish_called(Args) ->
-    ?assert(meck:called(dby, publish, Args ++ [[persistent]])).
+    ?assert(meck:called(dby, publish, Args ++ [[persistent]])
+            %% If the function wasn't called with the expected
+            %% arguments, ensure that the test output contains the
+            %% arguments and all calls to functions in dby.
+            orelse {Args, meck:history(dby)}).
 
 %%%=============================================================================
 %%% Internal functions
@@ -123,9 +127,14 @@ unmock_flow_table_identifiers() ->
 flow_mod_identifier({Dpid, OFVersion, FlowMod}) ->
     {_Matches, _Instructions, Opts} = FlowMod,
     Cookie = proplists:get_value(cookie, Opts),
-    {Cookie, [{<<"type">>, <<"of_flow_mod">>},
-              {<<"dpid">>, Dpid},
-              {<<"of_version">>, OFVersion}]}.
+    JSONFriendlyCookie = iolist_to_binary(io_lib:format("~w", [Cookie])),
+    {JSONFriendlyCookie,
+     [{<<"type">>, <<"of_flow_mod">>},
+      {<<"dpid">>, Dpid},
+      {<<"of_version">>, OFVersion}
+      %% We could check the tail of the list, but that would amount to
+      %% duplicating the code in dofl_identifier in this test.
+      | '_']}.
 
 flow_table_identifier({Dpid, _OFVersion, FlowMod}) ->
     TableNo = proplists:get_value(table_id, _Opts = element(3, FlowMod)),
