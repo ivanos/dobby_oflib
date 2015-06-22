@@ -1,0 +1,6 @@
+language: erlang
+otp_release:
+    - 17.4
+script:
+    - rebar compile
+    - rebar skip_deps=true eunit ct
