@@ -134,24 +134,18 @@ publish(PublisherId, Src, Dst, LinkMetadata) ->
 
 %% This function returns a function to be passed to dby:search.
 vertices_edges_search_fun(Ep1, Ep2) ->
-    fun(Id, #{<<"type">> := ?MD_VALUE(<<"endpoint">>)}, [], Acc) when Id =:= Ep1 ->
+    fun(Id, #{<<"type">> := ?MD_VALUE(_Endpoint)}, [], Acc) when Id =:= Ep1 ->
             %% This is the starting point.
             {continue, Acc};
        (Id,
-        #{<<"type">> := ?MD_VALUE(<<"endpoint">>)} = NodeMetadata,
+        #{<<"type">> := ?MD_VALUE(_Endpoint)} = NodeMetadata,
         [{_,
           #{<<"type">> := ?MD_VALUE(<<"of_port">>)},
           #{<<"type">> := ?MD_VALUE(<<"connected_to">>)}} | _] = Path,
-        Acc) ->
-            %% We've found an endpoint.  That's only interesting if
-            %% it's the endpoint we're looking for.
-            if Id =:= Ep2 ->
-                    %% If so, stop and return the path.
-                    {stop, lists:reverse(Path, [{Id, NodeMetadata, #{}}])};
-               true ->
-                    %% Otherwise, keep going.
-                    {skip, Acc}
-            end;
+        _Acc) when Id =:= Ep2 ->
+            %% We found the endpoint we're looking for.
+            %% Stop and return the path.
+            {stop, lists:reverse(Path, [{Id, NodeMetadata, #{}}])};
        (_Id,
         #{<<"type">> := Type2} = _NodeMadata,
         [{_, #{<<"type">> := Type1}, #{<<"type">> := EdgeType}} | _] = _Path,
@@ -172,7 +166,7 @@ vertices_edges_search_fun(Ep1, Ep2) ->
 %% node of type `Node1Type' to a node of type `Node2Type'.
 valid_edge(#{value := NodeType1}, #{value := EdgeType}, #{value := NodeType2}) ->
     valid_edge(NodeType1, EdgeType, NodeType2);
-valid_edge(<<"endpoint">>, <<"connected_to">>, <<"of_port">>) ->
+valid_edge(_Endpoint, <<"connected_to">>, <<"of_port">>) ->
     true;
 %% Accept both 'port_of' and 'part_of' for now; use 'part_of'
 %% exclusively at some point in the future.
