@@ -141,8 +141,10 @@ vertices_edges_search_fun(Ep1, Ep2) ->
         #{<<"type">> := ?MD_VALUE(_Endpoint)} = NodeMetadata,
         [{_,
           #{<<"type">> := ?MD_VALUE(<<"of_port">>)},
-          #{<<"type">> := ?MD_VALUE(<<"connected_to">>)}} | _] = Path,
-        _Acc) when Id =:= Ep2 ->
+          #{<<"type">> := ?MD_VALUE(ConnectedToOrBoundTo)}} | _] = Path,
+        _Acc) when Id =:= Ep2,
+                   ConnectedToOrBoundTo =:= <<"connected_to">> orelse
+                   ConnectedToOrBoundTo =:= <<"bound_to">> ->
             %% We found the endpoint we're looking for.
             %% Stop and return the path.
             {stop, lists:reverse(Path, [{Id, NodeMetadata, #{}}])};
@@ -168,6 +170,9 @@ valid_edge(#{value := NodeType1}, #{value := EdgeType}, #{value := NodeType2}) -
     valid_edge(NodeType1, EdgeType, NodeType2);
 valid_edge(_Endpoint, <<"connected_to">>, <<"of_port">>) ->
     true;
+%% XXX: accepting "bound_to" as synonym for "connected_to"
+valid_edge(_Endpoint, <<"bound_to">>, <<"of_port">>) ->
+    true;
 %% Accept both 'port_of' and 'part_of' for now; use 'part_of'
 %% exclusively at some point in the future.
 valid_edge(<<"of_port">>, <<"port_of">>, <<"of_switch">>) ->
@@ -179,6 +184,9 @@ valid_edge(<<"of_port">>, <<"part_of">>, <<"of_switch">>) ->
 valid_edge(<<"of_switch">>, <<"part_of">>, <<"of_port">>) ->
     true;
 valid_edge(<<"of_port">>, <<"connected_to">>, <<"of_port">>) ->
+    true;
+%% XXX: accepting "bound_to" as synonym for "connected_to"
+valid_edge(<<"of_port">>, <<"bound_to">>, <<"of_port">>) ->
     true;
 valid_edge(_, _, _) ->
     false.
