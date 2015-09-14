@@ -139,6 +139,8 @@ assert_flow_path(NetFlowId, FlowModsIds) ->
 
 setup_dobby(Config) ->
     application:stop(dobby),
+    application:load(erl_mnesia),
+    application:set_env(erl_mnesia, options, [persistent]),
     {ok, _} = application:ensure_all_started(dobby),
     ok = dby_bulk:import(json0, ?config(add_topo_filename, Config)).
 
