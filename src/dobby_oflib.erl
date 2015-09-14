@@ -188,6 +188,21 @@ valid_edge(<<"of_port">>, <<"connected_to">>, <<"of_port">>) ->
 %% XXX: accepting "bound_to" as synonym for "connected_to"
 valid_edge(<<"of_port">>, <<"bound_to">>, <<"of_port">>) ->
     true;
+%% For Leviathan:
+valid_edge(<<"container">>, <<"bound_to">>, <<"endpoint">>) ->
+    true;
+valid_edge(<<"endpoint">>, <<"veth_peer">>, <<"endpoint">>) ->
+    true;
+valid_edge(<<"endpoint">>, <<"bound_to">>, <<"bridge">>) ->
+    true;
+valid_edge(<<"bridge">>, <<"bound_to">>, <<"of_port">>) ->
+    true;
+valid_edge(<<"endpoint">>, <<"bound_to">>, <<"container">>) ->
+    true;
+valid_edge(<<"bridge">>, <<"bound_to">>, <<"endpoint">>) ->
+    true;
+valid_edge(<<"of_port">>, <<"bound_to">>, <<"bridge">>) ->
+    true;
 valid_edge(_, _, _) ->
     false.
 
