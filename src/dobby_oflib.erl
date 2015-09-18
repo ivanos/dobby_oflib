@@ -30,7 +30,7 @@ get_path(SrcEndpoint, DstEndpoint) ->
            vertices_edges_search_fun(SrcEndpoint, DstEndpoint),
            not_found,
            SrcEndpoint,
-           [breadth, {max_depth, 100}]) of
+           [breadth, {max_depth, 100}, {loop, link}]) of
         Path = [_|_] ->
             Digraph = digraph:new(),
             insert_path(Path, Digraph),
@@ -138,21 +138,14 @@ vertices_edges_search_fun(Ep1, Ep2) ->
             %% This is the starting point.
             {continue, Acc};
        (Id,
-        #{<<"type">> := ?MD_VALUE(_Endpoint)} = NodeMetadata,
-        [{_,
-          #{<<"type">> := ?MD_VALUE(<<"of_port">>)},
-          #{<<"type">> := ?MD_VALUE(ConnectedToOrBoundTo)}} | _] = Path,
-        _Acc) when Id =:= Ep2,
-                   ConnectedToOrBoundTo =:= <<"connected_to">> orelse
-                   ConnectedToOrBoundTo =:= <<"bound_to">> ->
-            %% We found the endpoint we're looking for.
-            %% Stop and return the path.
-            {stop, lists:reverse(Path, [{Id, NodeMetadata, #{}}])};
-       (_Id,
-        #{<<"type">> := Type2} = _NodeMadata,
-        [{_, #{<<"type">> := Type1}, #{<<"type">> := EdgeType}} | _] = _Path,
+        #{<<"type">> := Type2} = NodeMetadata,
+        [{_, #{<<"type">> := Type1}, #{<<"type">> := EdgeType}} | _] = Path,
         Acc) ->
             case valid_edge(Type1, EdgeType, Type2) of
+                true when Id =:= Ep2 ->
+                    %% We found the endpoint we're looking for.
+                    %% Stop and return the path.
+                    {stop, lists:reverse(Path, [{Id, NodeMetadata, #{}}])};
                 true ->
                     {continue, Acc};
                 false ->
@@ -170,8 +163,12 @@ valid_edge(#{value := NodeType1}, #{value := EdgeType}, #{value := NodeType2}) -
     valid_edge(NodeType1, EdgeType, NodeType2);
 valid_edge(_Endpoint, <<"connected_to">>, <<"of_port">>) ->
     true;
+valid_edge(<<"of_port">>, <<"connected_to">>, _Endpoint) ->
+    true;
 %% XXX: accepting "bound_to" as synonym for "connected_to"
 valid_edge(_Endpoint, <<"bound_to">>, <<"of_port">>) ->
+    true;
+valid_edge(<<"of_port">>, <<"bound_to">>, _Endpoint) ->
     true;
 %% Accept both 'port_of' and 'part_of' for now; use 'part_of'
 %% exclusively at some point in the future.
@@ -187,6 +184,21 @@ valid_edge(<<"of_port">>, <<"connected_to">>, <<"of_port">>) ->
     true;
 %% XXX: accepting "bound_to" as synonym for "connected_to"
 valid_edge(<<"of_port">>, <<"bound_to">>, <<"of_port">>) ->
+    true;
+%% For Leviathan:
+valid_edge(<<"container">>, <<"bound_to">>, <<"endpoint">>) ->
+    true;
+valid_edge(<<"endpoint">>, <<"veth_peer">>, <<"endpoint">>) ->
+    true;
+valid_edge(<<"endpoint">>, <<"bound_to">>, <<"bridge">>) ->
+    true;
+valid_edge(<<"bridge">>, <<"bound_to">>, <<"of_port">>) ->
+    true;
+valid_edge(<<"endpoint">>, <<"bound_to">>, <<"container">>) ->
+    true;
+valid_edge(<<"bridge">>, <<"bound_to">>, <<"endpoint">>) ->
+    true;
+valid_edge(<<"of_port">>, <<"bound_to">>, <<"bridge">>) ->
     true;
 valid_edge(_, _, _) ->
     false.
