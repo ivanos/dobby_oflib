@@ -200,6 +200,8 @@ valid_edge(<<"bridge">>, <<"bound_to">>, <<"endpoint">>) ->
     true;
 valid_edge(<<"of_port">>, <<"bound_to">>, <<"bridge">>) ->
     true;
+valid_edge(<<"bridge">>, <<"tunnel">>, <<"bridge">>) ->
+    true;
 valid_edge(_, _, _) ->
     false.
 
